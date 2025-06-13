@@ -136,6 +136,7 @@ properties:
               - nexbox,a1
               - oranth,tx9-pro
               - tronsmart,vega-s96
+              - ugoos,am3
               - videostrong,gxm-kiii-pro
               - wetek,core2
           - const: amlogic,s912
