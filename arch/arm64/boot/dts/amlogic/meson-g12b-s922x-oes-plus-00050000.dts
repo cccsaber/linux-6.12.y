@@ -12,6 +12,7 @@
 
 &ethmac {
 	phy-mode = "rgmii-rxid";
-	amlogic,prg-eth-reg0 = <0xffffffff 0x00001629>;
-	amlogic,prg-eth-reg1 = <0xffffffff 0x00050000>;
+	amlogic,invert-rxclk;
+	amlogic,keep-rx-internal-delay;
+	rx-internal-delay-ps = <1000>;
 };
