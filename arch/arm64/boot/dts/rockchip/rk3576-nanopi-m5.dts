@@ -289,10 +289,18 @@
 	phy-supply = <&vcc_3v3_s3>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&eth0m0_miim>,
-		    <&eth0m0_tx_bus2>,
-		    <&eth0m0_rx_bus2>,
-		    <&eth0m0_rgmii_clk>,
-		    <&eth0m0_rgmii_bus>;
+			<&eth0m0_tx_bus2>,
+			<&eth0m0_rx_bus2>,
+			<&eth0m0_rgmii_clk>,
+			<&eth0m0_rgmii_bus>;
+
+	snps,reset-gpio = <&gpio2 RK_PB5 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	/* reset delays: pre-reset, reset-asserted, post-reset*/
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x30>;
+	rx_delay = <0x10>;
+
 	status = "okay";
 };
 
@@ -303,10 +311,17 @@
 	phy-supply = <&vcc_3v3_s3>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&eth1m0_miim>,
-		    <&eth1m0_tx_bus2>,
-		    <&eth1m0_rx_bus2>,
-		    <&eth1m0_rgmii_clk>,
-		    <&eth1m0_rgmii_bus>;
+			<&eth1m0_tx_bus2>,
+			<&eth1m0_rx_bus2>,
+			<&eth1m0_rgmii_clk>,
+			<&eth1m0_rgmii_bus>;
+
+	snps,reset-gpio = <&gpio3 RK_PA3 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x30>;
+	rx_delay = <0x10>;
+
 	status = "okay";
 };
 
