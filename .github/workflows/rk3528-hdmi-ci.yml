@@ -202,6 +202,8 @@ jobs:
           REFERENCE_DIR="$STAGE_DIR/reference"
           INITRD_SOURCE="generated"
           RELEASE_READY="false"
+          REF_MODULES_TAR=""
+          REF_HEADER_TAR=""
 
           rm -rf "$PACKAGE_DIR" "$REPORT_DIR" "$BUNDLE_PATH"
           mkdir -p "$PACKAGE_DIR" "$REPORT_DIR" "$MODULES_ROOT" "$BOOT_STAGE" "$DTB_STAGE" "$MODULES_STAGE" "$HEADERS_STAGE" "$REFERENCE_DIR"
@@ -225,8 +227,7 @@ jobs:
             -j"$(nproc)" \
             W=1 \
             Image \
-            modules \
-            2>&1 | tee "$REPORT_DIR/kernel-build.log"
+            2>&1 | tee "$REPORT_DIR/image-build.log"
 
           make -C "$BUILD_DIR" \
             O="$OUT_DIR" \
@@ -237,17 +238,6 @@ jobs:
             "${dtb_targets[@]}" \
             2>&1 | tee "$REPORT_DIR/dtb-build.log"
 
-          make -C "$BUILD_DIR" \
-            O="$OUT_DIR" \
-            ARCH="$ARCH" \
-            CROSS_COMPILE="$CROSS_COMPILE" \
-            INSTALL_MOD_PATH="$MODULES_ROOT" \
-            INSTALL_MOD_STRIP=1 \
-            modules_install \
-            2>&1 | tee "$REPORT_DIR/modules-install.log"
-
-          depmod -b "$MODULES_ROOT" "$KERNEL_RELEASE" 2>&1 | tee "$REPORT_DIR/depmod.log" || true
-
           cp "$OUT_DIR/arch/arm64/boot/Image" "$BOOT_STAGE/vmlinuz-$KERNEL_RELEASE"
           cp "$OUT_DIR/System.map" "$BOOT_STAGE/System.map-$KERNEL_RELEASE"
           cp "$OUT_DIR/.config" "$BOOT_STAGE/config-$KERNEL_RELEASE"
@@ -257,6 +247,14 @@ jobs:
             -o "$REFERENCE_DIR/${PACKAGE_NAME}.tar.gz"; then
             tar -xzf "$REFERENCE_DIR/${PACKAGE_NAME}.tar.gz" -C "$REFERENCE_DIR"
             ref_boot=("$REFERENCE_DIR/$PACKAGE_NAME"/boot-"$platform"-*.tar.gz)
+            ref_modules=("$REFERENCE_DIR/$PACKAGE_NAME"/modules-"$platform"-*.tar.gz)
+            ref_header=("$REFERENCE_DIR/$PACKAGE_NAME"/header-"$platform"-*.tar.gz)
+            if [ "${#ref_modules[@]}" -gt 0 ]; then
+              REF_MODULES_TAR="${ref_modules[0]}"
+            fi
+            if [ "${#ref_header[@]}" -gt 0 ]; then
+              REF_HEADER_TAR="${ref_header[0]}"
+            fi
             if [ "${#ref_boot[@]}" -gt 0 ]; then
               mkdir -p "$REFERENCE_DIR/boot"
               tar -xzf "${ref_boot[0]}" -C "$REFERENCE_DIR/boot"
@@ -266,9 +264,12 @@ jobs:
                 cp "${ref_initrd[0]}" "$BOOT_STAGE/initrd.img-$KERNEL_RELEASE"
                 cp "${ref_uinitrd[0]}" "$BOOT_STAGE/uInitrd-$KERNEL_RELEASE"
                 INITRD_SOURCE="reference"
-                RELEASE_READY="true"
               fi
             fi
+          fi
+
+          if [ "$INITRD_SOURCE" = "reference" ] && [ -n "$REF_MODULES_TAR" ] && [ -n "$REF_HEADER_TAR" ]; then
+            RELEASE_READY="true"
           fi
 
           if [ "$INITRD_SOURCE" != "reference" ]; then
@@ -297,27 +298,43 @@ jobs:
               "$BOOT_STAGE/uInitrd-$KERNEL_RELEASE"
           fi
 
-          cp -a "$MODULES_ROOT/lib/modules/$KERNEL_RELEASE" "$MODULES_STAGE/"
-          rm -f "$MODULES_STAGE/$KERNEL_RELEASE/build" "$MODULES_STAGE/$KERNEL_RELEASE/source"
+          if [ -n "$REF_MODULES_TAR" ]; then
+            tar -xzf "$REF_MODULES_TAR" -C "$MODULES_STAGE"
+          else
+            printf '%s\n' \
+              "No exact modules bundle was found in ${fnnas_repo}/releases/tag/kernel_fnnas for ${PACKAGE_NAME}." \
+              "This workflow now builds Image + DTBs + RK3528 HDMI objects and reuses a previous modules package when available." \
+              > "$REPORT_DIR/modules-note.txt"
+            mkdir -p "$MODULES_STAGE/$KERNEL_RELEASE"
+          fi
 
-          while IFS= read -r -d '' dtb_file; do
-            cp "$dtb_file" "$DTB_STAGE/"
-          done < <(find "$dtb_source_dir" -type f \( -name '*.dtb' -o -name '*.dtbo' \) -print0)
-
-          rsync -a "$BUILD_DIR/Makefile" "$HEADERS_STAGE/"
-          rsync -a "$BUILD_DIR/Kconfig" "$HEADERS_STAGE/"
-          rsync -a "$BUILD_DIR/scripts/" "$HEADERS_STAGE/scripts/"
-          rsync -a "$BUILD_DIR/include/" "$HEADERS_STAGE/include/"
-          rsync -a --exclude 'boot/' "$BUILD_DIR/arch/arm64/" "$HEADERS_STAGE/arch/arm64/"
-          cp "$OUT_DIR/.config" "$HEADERS_STAGE/.config"
-          cp "$OUT_DIR/Module.symvers" "$HEADERS_STAGE/Module.symvers"
-          cp "$OUT_DIR/System.map" "$HEADERS_STAGE/System.map"
-          rsync -a "$OUT_DIR/include/" "$HEADERS_STAGE/include/"
-          rsync -a "$OUT_DIR/arch/arm64/include/" "$HEADERS_STAGE/arch/arm64/include/"
-          rsync -a "$OUT_DIR/scripts/" "$HEADERS_STAGE/scripts/"
+          if [ -n "$REF_HEADER_TAR" ]; then
+            tar -xzf "$REF_HEADER_TAR" -C "$HEADERS_STAGE"
+          else
+            printf '%s\n' \
+              "No exact headers bundle was found in ${fnnas_repo}/releases/tag/kernel_fnnas for ${PACKAGE_NAME}." \
+              "A minimal headers package will be generated from this source tree for inspection only." \
+              > "$REPORT_DIR/header-note.txt"
+            rsync -a "$BUILD_DIR/Makefile" "$HEADERS_STAGE/"
+            rsync -a "$BUILD_DIR/Kconfig" "$HEADERS_STAGE/"
+            rsync -a "$BUILD_DIR/scripts/" "$HEADERS_STAGE/scripts/"
+            rsync -a "$BUILD_DIR/include/" "$HEADERS_STAGE/include/"
+            rsync -a --exclude 'boot/' "$BUILD_DIR/arch/arm64/" "$HEADERS_STAGE/arch/arm64/"
+            cp "$OUT_DIR/.config" "$HEADERS_STAGE/.config"
+            if [ -f "$OUT_DIR/Module.symvers" ]; then
+              cp "$OUT_DIR/Module.symvers" "$HEADERS_STAGE/Module.symvers"
+            else
+              : > "$HEADERS_STAGE/Module.symvers"
+            fi
+            cp "$OUT_DIR/System.map" "$HEADERS_STAGE/System.map"
+            rsync -a "$OUT_DIR/include/" "$HEADERS_STAGE/include/"
+            rsync -a "$OUT_DIR/arch/arm64/include/" "$HEADERS_STAGE/arch/arm64/include/"
+            rsync -a "$OUT_DIR/scripts/" "$HEADERS_STAGE/scripts/"
+          fi
 
           cp "$OUT_DIR/.config" "$REPORT_DIR/kernel.config"
           printf '%s\n' "$KERNEL_RELEASE" > "$REPORT_DIR/kernelrelease.txt"
+          printf '%s\n' "$KERNEL_BASE" > "$REPORT_DIR/kernel-base.txt"
           printf '%s\n' "$PACKAGE_NAME" > "$REPORT_DIR/package-name.txt"
           printf '%s\n' "$INITRD_SOURCE" > "$REPORT_DIR/initrd-source.txt"
           printf '%s\n' "$RELEASE_READY" > "$REPORT_DIR/release-ready.txt"
@@ -383,7 +400,7 @@ jobs:
             - Use this repository as `kernel_repo` in FnNAS tooling when consuming `${{ steps.package.outputs.bundle_name }}`.
 
       - name: Upload build artifacts
-        if: always()
+        if: ${{ always() && steps.package.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.bundle_name || 'linux-6.12.y-rockchip' }}
