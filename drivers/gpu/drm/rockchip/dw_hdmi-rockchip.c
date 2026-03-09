@@ -282,7 +282,8 @@ static void dw_hdmi_rockchip_encoder_mode_set(struct drm_encoder *encoder,
 {
 	struct rockchip_hdmi *hdmi = to_rockchip_hdmi(encoder);
 
-	clk_set_rate(hdmi->ref_clk, adj_mode->clock * 1000);
+	if (hdmi->ref_clk)
+		clk_set_rate(hdmi->ref_clk, adj_mode->clock * 1000);
 }
 
 static void dw_hdmi_rockchip_encoder_enable(struct drm_encoder *encoder)
@@ -463,6 +464,20 @@ static const struct dw_hdmi_phy_ops rk3328_hdmi_phy_ops = {
 	.setup_hpd	= dw_hdmi_rk3328_setup_hpd,
 };
 
+static enum drm_connector_status
+	dw_hdmi_rk3528_read_hpd(struct dw_hdmi *dw_hdmi, void *data)
+{
+	return dw_hdmi_phy_read_hpd(dw_hdmi, data);
+}
+
+static const struct dw_hdmi_phy_ops rk3528_hdmi_phy_ops = {
+	.init		= dw_hdmi_rockchip_genphy_init,
+	.disable	= dw_hdmi_rockchip_genphy_disable,
+	.read_hpd	= dw_hdmi_rk3528_read_hpd,
+	.update_hpd	= dw_hdmi_phy_update_hpd,
+	.setup_hpd	= dw_hdmi_phy_setup_hpd,
+};
+
 static struct rockchip_hdmi_chip_data rk3328_chip_data = {
 	.lcdsel_grf_reg = -1,
 	.max_tmds_clock = 594000,
@@ -475,6 +490,25 @@ static const struct dw_hdmi_plat_data rk3328_hdmi_drv_data = {
 	.phy_name = "inno_dw_hdmi_phy2",
 	.phy_force_vendor = true,
 	.use_drm_infoframe = true,
+	.ycbcr_420_allowed = true,
+};
+
+static struct rockchip_hdmi_chip_data rk3528_chip_data = {
+	.lcdsel_grf_reg = -1,
+	.max_tmds_clock = 594000,
+};
+
+static const struct dw_hdmi_plat_data rk3528_hdmi_drv_data = {
+	.mode_valid = dw_hdmi_rockchip_mode_valid,
+	.mpll_cfg   = rockchip_mpll_cfg,
+	.cur_ctr    = rockchip_cur_ctr,
+	.phy_config = rockchip_phy_config,
+	.phy_data = &rk3528_chip_data,
+	.phy_ops = &rk3528_hdmi_phy_ops,
+	.phy_name = "inno_dw_hdmi_phy2",
+	.phy_force_vendor = true,
+	.use_drm_infoframe = true,
+	.ycbcr_420_allowed = true,
 };
 
 static struct rockchip_hdmi_chip_data rk3399_chip_data = {
@@ -519,6 +553,9 @@ static const struct of_device_id dw_hdmi_rockchip_dt_ids[] = {
 	},
 	{ .compatible = "rockchip,rk3399-dw-hdmi",
 	  .data = &rk3399_hdmi_drv_data
+	},
+	{ .compatible = "rockchip,rk3528-dw-hdmi",
+	  .data = &rk3528_hdmi_drv_data
 	},
 	{ .compatible = "rockchip,rk3568-dw-hdmi",
 	  .data = &rk3568_hdmi_drv_data
@@ -587,12 +624,19 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 	}
 
 	if (hdmi->phy) {
-		struct of_phandle_args clkspec;
+		struct of_phandle_args clkspec = { };
+		struct device_node *clk_np;
 
-		clkspec.np = hdmi->phy->dev.of_node;
+		clk_np = of_get_child_by_name(hdmi->phy->dev.of_node, "clk-port");
+		if (!clk_np)
+			clk_np = of_node_get(hdmi->phy->dev.of_node);
+
+		clkspec.np = clk_np;
 		hdmi->hdmiphy_clk = of_clk_get_from_provider(&clkspec);
 		if (IS_ERR(hdmi->hdmiphy_clk))
 			hdmi->hdmiphy_clk = NULL;
+
+		of_node_put(clk_np);
 	}
 
 	if (hdmi->chip_data == &rk3568_chip_data) {
