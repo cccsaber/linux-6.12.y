@@ -1,18 +1,9 @@
-name: Build linux-6.12.y
+name: Build linux-6.12.y-rockchip
 
 on:
   repository_dispatch:
   workflow_dispatch:
     inputs:
-      platform:
-        description: "Select fnnas kernel platform"
-        required: false
-        default: "rockchip"
-        type: choice
-        options:
-          - rockchip
-          - amlogic
-          - allwinner
       upstream_repo:
         description: "Full kernel source used as the CI build base"
         required: false
@@ -27,7 +18,7 @@ on:
         default: "ophub/fnnas"
 
 concurrency:
-  group: linux-6.12.y-${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.platform || 'rockchip' }}
+  group: linux-6.12.y-rockchip-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -82,7 +73,7 @@ jobs:
           BUILD_DIR: ${{ runner.temp }}/linux-full
           OUT_DIR: ${{ runner.temp }}/out/arm64
           STAGE_DIR: ${{ runner.temp }}/fnnas-kernel
-          PLATFORM_INPUT: ${{ github.event.inputs.platform }}
+          PLATFORM: rockchip
           UPSTREAM_REPO_INPUT: ${{ github.event.inputs.upstream_repo }}
           UPSTREAM_REF_INPUT: ${{ github.event.inputs.upstream_ref }}
           FNNAS_REPO_INPUT: ${{ github.event.inputs.fnnas_repo }}
@@ -90,7 +81,7 @@ jobs:
           set -euxo pipefail
           shopt -s nullglob
 
-          platform="${PLATFORM_INPUT:-rockchip}"
+          platform="$PLATFORM"
           repo="${UPSTREAM_REPO_INPUT:-https://github.com/cccsaber/linux-6.12.y.git}"
           ref="${UPSTREAM_REF_INPUT:-main}"
           fnnas_repo="${FNNAS_REPO_INPUT:-ophub/fnnas}"
@@ -113,62 +104,31 @@ jobs:
             --exclude 'fnnas/' \
             "$GITHUB_WORKSPACE/" "$BUILD_DIR/"
 
-          case "$platform" in
-            rockchip)
-              config_args=(
-                -e MODULES
-                -e BLK_DEV_INITRD
-                -e ARCH_ROCKCHIP
-                -e ROCKCHIP_IOMMU
-                -e DRM
-                -e DRM_ROCKCHIP
-                -e ROCKCHIP_VOP
-                -e ROCKCHIP_VOP2
-                -e ROCKCHIP_DW_HDMI
-                -e PHY_ROCKCHIP_INNO_HDMI
-              )
-              dtb_targets=(
-                rk3528-armsom-sige1.dtb
-                rk3528-hlink-h28k.dtb
-                rk3528-nanopi-zero2.dtb
-                rk3528-radxa-e20c.dtb
-                rk3528-radxa-e24c.dtb
-                rk3528-radxa-e24c-dsa.dtb
-                rk3528-rock-2a.dtb
-                rk3528-rock-2f.dtb
-                rk3528-yixun-rs6pro.dtb
-              )
-              dtb_build_targets=("${dtb_targets[@]/#/rockchip/}")
-              dtb_stage_mode="list"
-              dtb_source_dir="$OUT_DIR/arch/arm64/boot/dts/rockchip"
-              ;;
-            amlogic)
-              config_args=(
-                -e MODULES
-                -e BLK_DEV_INITRD
-                -e ARCH_MESON
-              )
-              dtb_targets=(dtbs)
-              dtb_build_targets=("${dtb_targets[@]}")
-              dtb_stage_mode="dir"
-              dtb_source_dir="$OUT_DIR/arch/arm64/boot/dts/amlogic"
-              ;;
-            allwinner)
-              config_args=(
-                -e MODULES
-                -e BLK_DEV_INITRD
-                -e ARCH_SUNXI
-              )
-              dtb_targets=(dtbs)
-              dtb_build_targets=("${dtb_targets[@]}")
-              dtb_stage_mode="dir"
-              dtb_source_dir="$OUT_DIR/arch/arm64/boot/dts/allwinner"
-              ;;
-            *)
-              echo "Unsupported platform: $platform" >&2
-              exit 1
-              ;;
-          esac
+          config_args=(
+            -e MODULES
+            -e BLK_DEV_INITRD
+            -e ARCH_ROCKCHIP
+            -e ROCKCHIP_IOMMU
+            -e DRM
+            -e DRM_ROCKCHIP
+            -e ROCKCHIP_VOP
+            -e ROCKCHIP_VOP2
+            -e ROCKCHIP_DW_HDMI
+            -e PHY_ROCKCHIP_INNO_HDMI
+          )
+          dtb_targets=(
+            rk3528-armsom-sige1.dtb
+            rk3528-hlink-h28k.dtb
+            rk3528-nanopi-zero2.dtb
+            rk3528-radxa-e20c.dtb
+            rk3528-radxa-e24c.dtb
+            rk3528-radxa-e24c-dsa.dtb
+            rk3528-rock-2a.dtb
+            rk3528-rock-2f.dtb
+            rk3528-yixun-rs6pro.dtb
+          )
+          dtb_build_targets=("${dtb_targets[@]/#/rockchip/}")
+          dtb_source_dir="$OUT_DIR/arch/arm64/boot/dts/rockchip"
 
           make -C "$BUILD_DIR" \
             O="$OUT_DIR" \
@@ -214,17 +174,15 @@ jobs:
           rm -rf "$PACKAGE_DIR" "$REPORT_DIR" "$BUNDLE_PATH"
           mkdir -p "$PACKAGE_DIR" "$REPORT_DIR" "$MODULES_ROOT" "$BOOT_STAGE" "$DTB_STAGE" "$MODULES_STAGE" "$HEADERS_STAGE" "$REFERENCE_DIR"
 
-          if [ "$platform" = "rockchip" ]; then
-            make -C "$BUILD_DIR" \
-              O="$OUT_DIR" \
-              ARCH="$ARCH" \
-              CROSS_COMPILE="$CROSS_COMPILE" \
-              -j"$(nproc)" \
-              W=1 \
-              drivers/phy/rockchip/phy-rockchip-inno-hdmi.o \
-              drivers/gpu/drm/rockchip/dw_hdmi-rockchip.o \
-              2>&1 | tee "$REPORT_DIR/obj-build.log"
-          fi
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            -j"$(nproc)" \
+            W=1 \
+            drivers/phy/rockchip/phy-rockchip-inno-hdmi.o \
+            drivers/gpu/drm/rockchip/dw_hdmi-rockchip.o \
+            2>&1 | tee "$REPORT_DIR/obj-build.log"
 
           make -C "$BUILD_DIR" \
             O="$OUT_DIR" \
@@ -244,18 +202,9 @@ jobs:
             "${dtb_build_targets[@]}" \
             2>&1 | tee "$REPORT_DIR/dtb-build.log"
 
-          if [ "$dtb_stage_mode" = "list" ]; then
-            for dtb in "${dtb_targets[@]}"; do
-              cp "$dtb_source_dir/$dtb" "$DTB_STAGE/"
-            done
-          else
-            rsync -a \
-              --include '*/' \
-              --include '*.dtb' \
-              --include '*.dtbo' \
-              --exclude '*' \
-              "$dtb_source_dir/" "$DTB_STAGE/"
-          fi
+          for dtb in "${dtb_targets[@]}"; do
+            cp "$dtb_source_dir/$dtb" "$DTB_STAGE/"
+          done
 
           cp "$OUT_DIR/arch/arm64/boot/Image" "$BOOT_STAGE/vmlinuz-$KERNEL_RELEASE"
           cp "$OUT_DIR/System.map" "$BOOT_STAGE/System.map-$KERNEL_RELEASE"
@@ -362,10 +311,8 @@ jobs:
           printf '%s\n' "$INITRD_SOURCE" > "$REPORT_DIR/initrd-source.txt"
           printf '%s\n' "$RELEASE_READY" > "$REPORT_DIR/release-ready.txt"
           printf '%s\n' "$fnnas_repo" > "$REPORT_DIR/reference-repo.txt"
-          if [ "$platform" = "rockchip" ]; then
-            cp "$OUT_DIR/drivers/phy/rockchip/phy-rockchip-inno-hdmi.o" "$REPORT_DIR/"
-            cp "$OUT_DIR/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.o" "$REPORT_DIR/"
-          fi
+          cp "$OUT_DIR/drivers/phy/rockchip/phy-rockchip-inno-hdmi.o" "$REPORT_DIR/"
+          cp "$OUT_DIR/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.o" "$REPORT_DIR/"
           if [ "$RELEASE_READY" != "true" ]; then
             printf '%s\n' \
               "No exact boot bundle was found in ${fnnas_repo}/releases/tag/kernel_fnnas for ${PACKAGE_NAME}." \
@@ -419,7 +366,7 @@ jobs:
           makeLatest: false
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - FnNAS-style kernel bundle built from `linux-6.12.y`.
+            - FnNAS-style kernel bundle built from `linux-6.12.y-rockchip`.
             - Use this repository as `kernel_repo` in FnNAS tooling when consuming `${{ steps.package.outputs.bundle_name }}`.
 
       - name: Upload build artifacts
