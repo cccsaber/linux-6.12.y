@@ -156,7 +156,7 @@ jobs:
           KERNEL_RELEASE="$(make -s -C "$BUILD_DIR" O="$OUT_DIR" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" kernelrelease)"
           KERNEL_BASE="${KERNEL_RELEASE%%-*}"
           PACKAGE_NAME="${KERNEL_BASE}-${platform}"
-          PACKAGE_DIR="$ARTIFACT_DIR/$PACKAGE_NAME"
+          PACKAGE_PATH="$ARTIFACT_DIR/${PACKAGE_NAME}.tar.gz"
           REPORT_DIR="$ARTIFACT_DIR/${PACKAGE_NAME}-report"
           BUNDLE_PATH="$RUNNER_TEMP/${PACKAGE_NAME}.tar.gz"
           MODULES_ROOT="$STAGE_DIR/modules-root"
@@ -170,8 +170,8 @@ jobs:
           REF_MODULES_TAR=""
           REF_HEADER_TAR=""
 
-          rm -rf "$PACKAGE_DIR" "$REPORT_DIR" "$BUNDLE_PATH"
-          mkdir -p "$PACKAGE_DIR" "$REPORT_DIR" "$MODULES_ROOT" "$BOOT_STAGE" "$DTB_STAGE" "$MODULES_STAGE" "$HEADERS_STAGE" "$REFERENCE_DIR"
+          rm -rf "$PACKAGE_PATH" "$REPORT_DIR" "$BUNDLE_PATH"
+          mkdir -p "$REPORT_DIR" "$MODULES_ROOT" "$BOOT_STAGE" "$DTB_STAGE" "$MODULES_STAGE" "$HEADERS_STAGE" "$REFERENCE_DIR"
 
           make -C "$BUILD_DIR" \
             O="$OUT_DIR" \
@@ -212,10 +212,15 @@ jobs:
           if curl -fsSL \
             "https://github.com/${fnnas_repo}/releases/download/kernel_fnnas/${PACKAGE_NAME}.tar.gz" \
             -o "$REFERENCE_DIR/${PACKAGE_NAME}.tar.gz"; then
-            tar -xzf "$REFERENCE_DIR/${PACKAGE_NAME}.tar.gz" -C "$REFERENCE_DIR"
-            ref_boot=("$REFERENCE_DIR/$PACKAGE_NAME"/boot-"$platform"-*.tar.gz)
-            ref_modules=("$REFERENCE_DIR/$PACKAGE_NAME"/modules-"$platform"-*.tar.gz)
-            ref_header=("$REFERENCE_DIR/$PACKAGE_NAME"/header-"$platform"-*.tar.gz)
+            mkdir -p "$REFERENCE_DIR/extracted"
+            tar -xzf "$REFERENCE_DIR/${PACKAGE_NAME}.tar.gz" -C "$REFERENCE_DIR/extracted"
+            ref_root="$REFERENCE_DIR/extracted"
+            if [ -d "$ref_root/$PACKAGE_NAME" ]; then
+              ref_root="$ref_root/$PACKAGE_NAME"
+            fi
+            ref_boot=("$ref_root"/boot-"$platform"-*.tar.gz)
+            ref_modules=("$ref_root"/modules-"$platform"-*.tar.gz)
+            ref_header=("$ref_root"/header-"$platform"-*.tar.gz)
             if [ "${#ref_modules[@]}" -gt 0 ]; then
               REF_MODULES_TAR="${ref_modules[0]}"
             fi
@@ -321,28 +326,39 @@ jobs:
 
           (
             cd "$BOOT_STAGE"
-            tar -czf "$PACKAGE_DIR/boot-$platform-$KERNEL_RELEASE.tar.gz" *
+            tar -czf "$STAGE_DIR/boot-$platform-$KERNEL_RELEASE.tar.gz" *
           )
           (
             cd "$DTB_STAGE"
-            tar -czf "$PACKAGE_DIR/dtb-$platform-$KERNEL_RELEASE.tar.gz" *
+            tar -czf "$STAGE_DIR/dtb-$platform-$KERNEL_RELEASE.tar.gz" *
           )
           (
             cd "$MODULES_STAGE"
-            tar -czf "$PACKAGE_DIR/modules-$platform-$KERNEL_RELEASE.tar.gz" *
+            tar -czf "$STAGE_DIR/modules-$platform-$KERNEL_RELEASE.tar.gz" *
           )
           (
             cd "$HEADERS_STAGE"
-            tar -czf "$PACKAGE_DIR/header-$platform-$KERNEL_RELEASE.tar.gz" *
+            tar -czf "$STAGE_DIR/header-$platform-$KERNEL_RELEASE.tar.gz" *
           )
 
           (
-            cd "$PACKAGE_DIR"
-            sha256sum * > sha256sums
+            cd "$STAGE_DIR"
+            sha256sum \
+              "boot-$platform-$KERNEL_RELEASE.tar.gz" \
+              "dtb-$platform-$KERNEL_RELEASE.tar.gz" \
+              "modules-$platform-$KERNEL_RELEASE.tar.gz" \
+              "header-$platform-$KERNEL_RELEASE.tar.gz" \
+              > sha256sums
+            tar -czf "$PACKAGE_PATH" \
+              "boot-$platform-$KERNEL_RELEASE.tar.gz" \
+              "dtb-$platform-$KERNEL_RELEASE.tar.gz" \
+              "modules-$platform-$KERNEL_RELEASE.tar.gz" \
+              "header-$platform-$KERNEL_RELEASE.tar.gz" \
+              sha256sums
           )
 
           if [ "$RELEASE_READY" = "true" ]; then
-            tar -czf "$BUNDLE_PATH" -C "$ARTIFACT_DIR" "$PACKAGE_NAME"
+            cp "$PACKAGE_PATH" "$BUNDLE_PATH"
           else
             : > "$REPORT_DIR/release-bundle-skipped.txt"
           fi
@@ -350,7 +366,7 @@ jobs:
           {
             echo "bundle_name=$PACKAGE_NAME"
             echo "bundle_path=$BUNDLE_PATH"
-            echo "package_dir=$PACKAGE_DIR"
+            echo "package_path=$PACKAGE_PATH"
             echo "report_dir=$REPORT_DIR"
             echo "artifact_dir=$ARTIFACT_DIR"
             echo "kernel_release=$KERNEL_RELEASE"
@@ -380,6 +396,4 @@ jobs:
           name: ${{ steps.package.outputs.bundle_name || 'linux-6.12.y-rockchip' }}
           if-no-files-found: warn
           retention-days: 7
-          path: |
-            ${{ steps.package.outputs.package_dir }}/**
-            ${{ steps.package.outputs.report_dir }}/**
+          path: ${{ steps.package.outputs.package_path }}
