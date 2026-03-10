@@ -334,6 +334,10 @@ jobs:
               "No exact headers bundle was found in ${fnnas_repo}/releases/tag/kernel_fnnas for ${PACKAGE_NAME}." \
               "A minimal headers package will be generated from this source tree for inspection only." \
               > "$REPORT_DIR/header-note.txt"
+            mkdir -p \
+              "$HEADERS_STAGE/scripts" \
+              "$HEADERS_STAGE/include" \
+              "$HEADERS_STAGE/arch/arm64/include"
             rsync -a "$BUILD_DIR/Makefile" "$HEADERS_STAGE/"
             rsync -a "$BUILD_DIR/Kconfig" "$HEADERS_STAGE/"
             rsync -a "$BUILD_DIR/scripts/" "$HEADERS_STAGE/scripts/"
