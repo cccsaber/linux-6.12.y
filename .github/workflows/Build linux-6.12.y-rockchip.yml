@@ -12,10 +12,6 @@ on:
         description: "Git ref to clone from the build base repo"
         required: false
         default: "main"
-      fnnas_repo:
-        description: "FnNAS repo used to reuse matching boot initrd when available"
-        required: false
-        default: "ophub/fnnas"
 
 concurrency:
   group: linux-6.12.y-rockchip-${{ github.workflow }}-${{ github.ref }}
@@ -77,7 +73,6 @@ jobs:
           PLATFORM: rockchip
           UPSTREAM_REPO_INPUT: ${{ github.event.inputs.upstream_repo }}
           UPSTREAM_REF_INPUT: ${{ github.event.inputs.upstream_ref }}
-          FNNAS_REPO_INPUT: ${{ github.event.inputs.fnnas_repo }}
         run: |
           set -euxo pipefail
           shopt -s nullglob
@@ -85,7 +80,6 @@ jobs:
           platform="$PLATFORM"
           repo="${UPSTREAM_REPO_INPUT:-https://github.com/cccsaber/linux-6.12.y.git}"
           ref="${UPSTREAM_REF_INPUT:-main}"
-          fnnas_repo="${FNNAS_REPO_INPUT:-ophub/fnnas}"
 
           rm -rf "$BUILD_DIR" "$OUT_DIR" "$STAGE_DIR" "$ARTIFACT_DIR"
           mkdir -p "$OUT_DIR" "$STAGE_DIR" "$ARTIFACT_DIR"
@@ -164,14 +158,21 @@ jobs:
           DTB_STAGE="$STAGE_DIR/dtb"
           MODULES_STAGE="$STAGE_DIR/modules"
           HEADERS_STAGE="$STAGE_DIR/headers"
-          REFERENCE_DIR="$STAGE_DIR/reference"
-          INITRD_SOURCE="generated"
-          RELEASE_READY="false"
-          REF_MODULES_TAR=""
-          REF_HEADER_TAR=""
+          INITRD_ROOT="$STAGE_DIR/initrd"
+          INITRD_MODULES_ROOT="$INITRD_ROOT/lib/modules/$KERNEL_RELEASE"
+          MODULES_INSTALL_ROOT="$MODULES_ROOT/lib/modules/$KERNEL_RELEASE"
+          HEADERS_UAPI_STAGE="$STAGE_DIR/headers-uapi"
 
           rm -rf "$PACKAGE_PATH" "$REPORT_DIR" "$BUNDLE_PATH"
-          mkdir -p "$REPORT_DIR" "$MODULES_ROOT" "$BOOT_STAGE" "$DTB_STAGE" "$MODULES_STAGE" "$HEADERS_STAGE" "$REFERENCE_DIR"
+          mkdir -p \
+            "$REPORT_DIR" \
+            "$MODULES_ROOT" \
+            "$BOOT_STAGE" \
+            "$DTB_STAGE" \
+            "$MODULES_STAGE" \
+            "$HEADERS_STAGE" \
+            "$INITRD_ROOT" \
+            "$HEADERS_UAPI_STAGE"
 
           make -C "$BUILD_DIR" \
             O="$OUT_DIR" \
@@ -190,16 +191,29 @@ jobs:
             -j"$(nproc)" \
             W=1 \
             Image \
-            2>&1 | tee "$REPORT_DIR/image-build.log"
+            modules \
+            "${dtb_build_targets[@]}" \
+            2>&1 | tee "$REPORT_DIR/full-build.log"
 
           make -C "$BUILD_DIR" \
             O="$OUT_DIR" \
             ARCH="$ARCH" \
             CROSS_COMPILE="$CROSS_COMPILE" \
-            -j"$(nproc)" \
-            W=1 \
-            "${dtb_build_targets[@]}" \
-            2>&1 | tee "$REPORT_DIR/dtb-build.log"
+            INSTALL_MOD_PATH="$MODULES_ROOT" \
+            modules_install \
+            2>&1 | tee "$REPORT_DIR/modules-install.log"
+
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            INSTALL_HDR_PATH="$HEADERS_UAPI_STAGE" \
+            headers_install \
+            2>&1 | tee "$REPORT_DIR/headers-install.log"
+
+          if [ -x "$MODULES_INSTALL_ROOT/build/scripts/mod/modinfo" ]; then
+            "$MODULES_INSTALL_ROOT/build/scripts/mod/modinfo" -F filename 2>/dev/null >/dev/null || true
+          fi
 
           for dtb in "${dtb_targets[@]}"; do
             cp "$dtb_source_dir/$dtb" "$DTB_STAGE/"

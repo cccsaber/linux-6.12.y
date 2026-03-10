@@ -905,7 +905,7 @@ static struct platform_driver axis_fifo_driver = {
 		.of_match_table	= axis_fifo_of_match,
 	},
 	.probe		= axis_fifo_probe,
-	.remove		= axis_fifo_remove,
+	.remove_new	= axis_fifo_remove,
 };
 
 static int __init axis_fifo_init(void)

@@ -9,7 +9,6 @@
 #include <linux/module.h>
 #include <linux/firmware.h>
 #include <linux/regmap.h>
-#include <linux/string_choices.h>
 #include <linux/acpi.h>
 #include <acpi/acpi_bus.h>
 #include <linux/unaligned.h>
@@ -507,13 +506,13 @@ int btintel_version_info_tlv(struct hci_dev *hdev,
 
 		bt_dev_info(hdev, "Device revision is %u", version->dev_rev_id);
 		bt_dev_info(hdev, "Secure boot is %s",
-			    str_enabled_disabled(version->secure_boot));
+			    version->secure_boot ? "enabled" : "disabled");
 		bt_dev_info(hdev, "OTP lock is %s",
-			    str_enabled_disabled(version->otp_lock));
+			    version->otp_lock ? "enabled" : "disabled");
 		bt_dev_info(hdev, "API lock is %s",
-			    str_enabled_disabled(version->api_lock));
+			    version->api_lock ? "enabled" : "disabled");
 		bt_dev_info(hdev, "Debug lock is %s",
-			    str_enabled_disabled(version->debug_lock));
+			    version->debug_lock ? "enabled" : "disabled");
 		bt_dev_info(hdev, "Minimum firmware build %u week %u %u",
 			    version->min_fw_build_nn, version->min_fw_build_cw,
 			    2000 + version->min_fw_build_yy);
@@ -928,16 +927,16 @@ int btintel_read_boot_params(struct hci_dev *hdev,
 		    le16_to_cpu(params->dev_revid));
 
 	bt_dev_info(hdev, "Secure boot is %s",
-		    str_enabled_disabled(params->secure_boot));
+		    params->secure_boot ? "enabled" : "disabled");
 
 	bt_dev_info(hdev, "OTP lock is %s",
-		    str_enabled_disabled(params->otp_lock));
+		    params->otp_lock ? "enabled" : "disabled");
 
 	bt_dev_info(hdev, "API lock is %s",
-		    str_enabled_disabled(params->api_lock));
+		    params->api_lock ? "enabled" : "disabled");
 
 	bt_dev_info(hdev, "Debug lock is %s",
-		    str_enabled_disabled(params->debug_lock));
+		    params->debug_lock ? "enabled" : "disabled");
 
 	bt_dev_info(hdev, "Minimum firmware build %u week %u %u",
 		    params->min_fw_build_nn, params->min_fw_build_cw,
@@ -1041,7 +1040,7 @@ static int btintel_download_firmware_payload(struct hci_dev *hdev,
 		 * as needed.
 		 *
 		 * Send set of commands with 4 byte alignment from the
-		 * firmware data buffer as a single Data fragment.
+		 * firmware data buffer as a single Data fragement.
 		 */
 		if (!(frag_len % 4)) {
 			err = btintel_secure_send(hdev, 0x01, frag_len, fw_ptr);
@@ -1253,12 +1252,6 @@ static void btintel_reset_to_bootloader(struct hci_dev *hdev)
 	struct intel_reset params;
 	struct sk_buff *skb;
 
-	/* PCIe transport uses shared hardware reset mechanism for recovery
-	 * which gets triggered in pcie *setup* function on error.
-	 */
-	if (hdev->bus == HCI_PCI)
-		return;
-
 	/* Send Intel Reset command. This will result in
 	 * re-enumeration of BT controller.
 	 *
@@ -1274,7 +1267,6 @@ static void btintel_reset_to_bootloader(struct hci_dev *hdev)
 	 * boot_param:    Boot address
 	 *
 	 */
-
 	params.reset_type = 0x01;
 	params.patch_enable = 0x01;
 	params.ddc_reload = 0x01;
@@ -2810,13 +2802,6 @@ int btintel_bootloader_setup_tlv(struct hci_dev *hdev,
 	 */
 	boot_param = 0x00000000;
 
-	/* In case of PCIe, this function might get called multiple times with
-	 * same hdev instance if there is any error on firmware download.
-	 * Need to clear stale bits of previous firmware download attempt.
-	 */
-	for (int i = 0; i < __INTEL_NUM_FLAGS; i++)
-		btintel_clear_flag(hdev, i);
-
 	btintel_set_flag(hdev, INTEL_BOOTLOADER);
 
 	err = btintel_prepare_fw_download_tlv(hdev, ver, &boot_param);
@@ -2903,7 +2888,7 @@ void btintel_set_msft_opcode(struct hci_dev *hdev, u8 hw_variant)
 	case 0x12:	/* ThP */
 	case 0x13:	/* HrP */
 	case 0x14:	/* CcP */
-	/* All Intel new generation controllers support the Microsoft vendor
+	/* All Intel new genration controllers support the Microsoft vendor
 	 * extension are using 0xFC1E for VsMsftOpCode.
 	 */
 	case 0x17:

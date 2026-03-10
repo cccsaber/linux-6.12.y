@@ -268,22 +268,17 @@ static const unsigned int eth_act_led_pins[]		= { GPIOZ_15 };
 static const unsigned int pwm_a_pins[]			= { GPIOX_6 };
 
 /* pwm_b */
-static const unsigned int pwm_b_h_pins[]		= { GPIOH_7 };
 static const unsigned int pwm_b_x7_pins[]		= { GPIOX_7 };
 static const unsigned int pwm_b_x19_pins[]		= { GPIOX_19 };
-static const unsigned int pwm_b_z_pins[]		= { GPIOZ_0 };
 
 /* pwm_c */
 static const unsigned int pwm_c_c_pins[]		= { GPIOC_4 };
 static const unsigned int pwm_c_x5_pins[]		= { GPIOX_5 };
 static const unsigned int pwm_c_x8_pins[]		= { GPIOX_8 };
-static const unsigned int pwm_c_z_pins[]		= { GPIOZ_1 };
 
 /* pwm_d */
 static const unsigned int pwm_d_x3_pins[]		= { GPIOX_3 };
 static const unsigned int pwm_d_x6_pins[]		= { GPIOX_6 };
-static const unsigned int pwm_d_z_pins[]		= { GPIOZ_2 };
-static const unsigned int pwm_d_a_pins[]		= { GPIOA_4 };
 
 /* pwm_e */
 static const unsigned int pwm_e_pins[]			= { GPIOX_16 };
@@ -441,8 +436,6 @@ static const unsigned int tdm_c_dout1_z_pins[]		= { GPIOZ_3 };
 static const unsigned int tdm_c_dout2_z_pins[]		= { GPIOZ_4 };
 static const unsigned int tdm_c_dout3_z_pins[]		= { GPIOZ_5 };
 
-static const unsigned int pcie_clkreqn_pins[]		= { GPIOC_7 };
-
 static const struct meson_pmx_group meson_g12a_periphs_groups[] = {
 	GPIO_GROUP(GPIOZ_0),
 	GPIO_GROUP(GPIOZ_1),
@@ -598,10 +591,6 @@ static const struct meson_pmx_group meson_g12a_periphs_groups[] = {
 	GROUP(bt565_a_din5,		2),
 	GROUP(bt565_a_din6,		2),
 	GROUP(bt565_a_din7,		2),
-	GROUP(pwm_b_z,			5),
-	GROUP(pwm_c_z,			5),
-	GROUP(pwm_d_z,			2),
-	GROUP(pwm_d_a,			3),
 	GROUP(tsin_b_valid_z,		3),
 	GROUP(tsin_b_sop_z,		3),
 	GROUP(tsin_b_din0_z,		3),
@@ -716,7 +705,6 @@ static const struct meson_pmx_group meson_g12a_periphs_groups[] = {
 	GROUP(pdm_din2_c,		4),
 	GROUP(pdm_din3_c,		4),
 	GROUP(pdm_dclk_c,		4),
-	GROUP(pcie_clkreqn,		1),
 
 	/* bank GPIOH */
 	GROUP(spi1_mosi,		3),
@@ -735,7 +723,6 @@ static const struct meson_pmx_group meson_g12a_periphs_groups[] = {
 	GROUP(uart_c_rts,		2),
 	GROUP(iso7816_clk_h,		1),
 	GROUP(iso7816_data_h,		1),
-	GROUP(pwm_b_h,			5),
 	GROUP(pwm_f_h,			4),
 	GROUP(cec_ao_a_h,		4),
 	GROUP(cec_ao_b_h,		5),
@@ -1071,15 +1058,15 @@ static const char * const pwm_a_groups[] = {
 };
 
 static const char * const pwm_b_groups[] = {
-	"pwm_b_h", "pwm_b_x7", "pwm_b_x19", "pwm_b_z",
+	"pwm_b_x7", "pwm_b_x19",
 };
 
 static const char * const pwm_c_groups[] = {
-	"pwm_c_c", "pwm_c_x5", "pwm_c_x8", "pwm_c_z",
+	"pwm_c_c", "pwm_c_x5", "pwm_c_x8",
 };
 
 static const char * const pwm_d_groups[] = {
-	"pwm_d_x3", "pwm_d_x6", "pwm_d_z", "pwm_d_a",
+	"pwm_d_x3", "pwm_d_x6",
 };
 
 static const char * const pwm_e_groups[] = {
@@ -1178,10 +1165,6 @@ static const char * const tdm_c_groups[] = {
 	"tdm_c_dout2_a", "tdm_c_dout3_a",
 	"tdm_c_dout0_z", "tdm_c_dout1_z",
 	"tdm_c_dout2_z", "tdm_c_dout3_z",
-};
-
-static const char * const pcie_clkreqn_groups[] = {
-	"pcie_clkreqn"
 };
 
 static const char * const gpio_aobus_groups[] = {
@@ -1310,7 +1293,6 @@ static const struct meson_pmx_func meson_g12a_periphs_functions[] = {
 	FUNCTION(tdm_a),
 	FUNCTION(tdm_b),
 	FUNCTION(tdm_c),
-	FUNCTION(pcie_clkreqn),
 };
 
 static const struct meson_pmx_func meson_g12a_aobus_functions[] = {

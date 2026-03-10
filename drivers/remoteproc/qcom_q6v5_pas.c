@@ -1491,7 +1491,7 @@ MODULE_DEVICE_TABLE(of, adsp_of_match);
 
 static struct platform_driver adsp_driver = {
 	.probe = adsp_probe,
-	.remove = adsp_remove,
+	.remove_new = adsp_remove,
 	.driver = {
 		.name = "qcom_q6v5_pas",
 		.of_match_table = adsp_of_match,

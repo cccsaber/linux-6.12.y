@@ -10,19 +10,9 @@
 #include <linux/clk-provider.h>
 #include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
-#include "clk-pll.h"
+#include "a1-pll.h"
 #include "clk-regmap.h"
 #include "meson-clkc-utils.h"
-
-#define ANACTRL_FIXPLL_CTRL0	0x0
-#define ANACTRL_FIXPLL_CTRL1	0x4
-#define ANACTRL_FIXPLL_STS	0x14
-#define ANACTRL_HIFIPLL_CTRL0	0xc0
-#define ANACTRL_HIFIPLL_CTRL1	0xc4
-#define ANACTRL_HIFIPLL_CTRL2	0xc8
-#define ANACTRL_HIFIPLL_CTRL3	0xcc
-#define ANACTRL_HIFIPLL_CTRL4	0xd0
-#define ANACTRL_HIFIPLL_STS	0xd4
 
 #include <dt-bindings/clock/amlogic,a1-pll-clkc.h>
 
@@ -366,7 +356,7 @@ static struct platform_driver a1_pll_clkc_driver = {
 };
 module_platform_driver(a1_pll_clkc_driver);
 
-MODULE_DESCRIPTION("Amlogic A1 PLL Clock Controller driver");
+MODULE_DESCRIPTION("Amlogic S4 PLL Clock Controller driver");
 MODULE_AUTHOR("Jian Hu <jian.hu@amlogic.com>");
 MODULE_AUTHOR("Dmitry Rokosov <ddrokosov@sberdevices.ru>");
 MODULE_LICENSE("GPL");

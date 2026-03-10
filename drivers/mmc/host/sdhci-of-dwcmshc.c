@@ -24,7 +24,6 @@
 
 #include "sdhci-pltfm.h"
 #include "cqhci.h"
-#include "sdhci-cqhci.h"
 
 #define SDHCI_DWCMSHC_ARG2_STUFF	GENMASK(31, 16)
 
@@ -83,8 +82,6 @@
 #define DWCMSHC_EMMC_DLL_TXCLK		0x808
 #define DWCMSHC_EMMC_DLL_STRBIN		0x80c
 #define DECMSHC_EMMC_DLL_CMDOUT		0x810
-#define DECMSHC_EMMC_MISC_CON		0x81C
-#define MISC_INTCLK_EN			BIT(1)
 #define DWCMSHC_EMMC_DLL_STATUS0	0x840
 #define DWCMSHC_EMMC_DLL_START		BIT(0)
 #define DWCMSHC_EMMC_DLL_LOCKED		BIT(8)
@@ -237,7 +234,6 @@ struct dwcmshc_priv {
 
 struct dwcmshc_pltfm_data {
 	const struct sdhci_pltfm_data pdata;
-	const struct cqhci_host_ops *cqhci_host_ops;
 	int (*init)(struct device *dev, struct sdhci_host *host, struct dwcmshc_priv *dwc_priv);
 	void (*postinit)(struct sdhci_host *host, struct dwcmshc_priv *dwc_priv);
 };
@@ -620,73 +616,6 @@ static void dwcmshc_cqhci_dumpregs(struct mmc_host *mmc)
 	sdhci_dumpregs(mmc_priv(mmc));
 }
 
-static void rk35xx_sdhci_cqe_pre_enable(struct mmc_host *mmc)
-{
-	struct sdhci_host *host = mmc_priv(mmc);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct dwcmshc_priv *dwc_priv = sdhci_pltfm_priv(pltfm_host);
-	u32 reg;
-
-	/* Set Send Status Command Idle Timer to 10.66us (256 * 1 / 24) */
-	reg = sdhci_readl(host, dwc_priv->vendor_specific_area2 + CQHCI_SSC1);
-	reg = (reg & ~CQHCI_SSC1_CIT_MASK) | 0x0100;
-	sdhci_writel(host, reg, dwc_priv->vendor_specific_area2 + CQHCI_SSC1);
-
-	reg = sdhci_readl(host, dwc_priv->vendor_specific_area2 + CQHCI_CFG);
-	reg |= CQHCI_ENABLE;
-	sdhci_writel(host, reg, dwc_priv->vendor_specific_area2 + CQHCI_CFG);
-}
-
-static void rk35xx_sdhci_cqe_enable(struct mmc_host *mmc)
-{
-	struct sdhci_host *host = mmc_priv(mmc);
-	u32 reg;
-
-	reg = sdhci_readl(host, SDHCI_PRESENT_STATE);
-	while (reg & SDHCI_DATA_AVAILABLE) {
-		sdhci_readl(host, SDHCI_BUFFER);
-		reg = sdhci_readl(host, SDHCI_PRESENT_STATE);
-	}
-
-	sdhci_writew(host, DWCMSHC_SDHCI_CQE_TRNS_MODE, SDHCI_TRANSFER_MODE);
-
-	sdhci_cqe_enable(mmc);
-}
-
-static void rk35xx_sdhci_cqe_disable(struct mmc_host *mmc, bool recovery)
-{
-	struct sdhci_host *host = mmc_priv(mmc);
-	unsigned long flags;
-	u32 ctrl;
-
-	/*
-	 * During CQE command transfers, command complete bit gets latched.
-	 * So s/w should clear command complete interrupt status when CQE is
-	 * either halted or disabled. Otherwise unexpected SDCHI legacy
-	 * interrupt gets triggered when CQE is halted/disabled.
-	 */
-	spin_lock_irqsave(&host->lock, flags);
-	ctrl = sdhci_readl(host, SDHCI_INT_ENABLE);
-	ctrl |= SDHCI_INT_RESPONSE;
-	sdhci_writel(host,  ctrl, SDHCI_INT_ENABLE);
-	sdhci_writel(host, SDHCI_INT_RESPONSE, SDHCI_INT_STATUS);
-	spin_unlock_irqrestore(&host->lock, flags);
-
-	sdhci_cqe_disable(mmc, recovery);
-}
-
-static void rk35xx_sdhci_cqe_post_disable(struct mmc_host *mmc)
-{
-	struct sdhci_host *host = mmc_priv(mmc);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct dwcmshc_priv *dwc_priv = sdhci_pltfm_priv(pltfm_host);
-	u32 ctrl;
-
-	ctrl = sdhci_readl(host, dwc_priv->vendor_specific_area2 + CQHCI_CFG);
-	ctrl &= ~CQHCI_ENABLE;
-	sdhci_writel(host, ctrl, dwc_priv->vendor_specific_area2 + CQHCI_CFG);
-}
-
 static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
@@ -714,11 +643,10 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 
 	sdhci_set_clock(host, clock);
 
-	/* Disable cmd conflict check and internal clock gate */
+	/* Disable cmd conflict check */
 	reg = dwc_priv->vendor_specific_area1 + DWCMSHC_HOST_CTRL3;
 	extra = sdhci_readl(host, reg);
 	extra &= ~BIT(0);
-	extra |= BIT(4);
 	sdhci_writel(host, extra, reg);
 
 	if (clock <= 52000000) {
@@ -781,20 +709,19 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
 		0x3 << 19;  /* post-change delay */
 	sdhci_writel(host, extra, dwc_priv->vendor_specific_area1 + DWCMSHC_EMMC_ATCTRL);
 
-	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS200)
+	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS200 ||
+	    host->mmc->ios.timing == MMC_TIMING_MMC_HS400)
 		txclk_tapnum = priv->txclk_tapnum;
 
-	if (host->mmc->ios.timing == MMC_TIMING_MMC_HS400) {
+	if ((priv->devtype == DWCMSHC_RK3588) && host->mmc->ios.timing == MMC_TIMING_MMC_HS400) {
 		txclk_tapnum = DLL_TXCLK_TAPNUM_90_DEGREES;
 
-		if (priv->devtype != DWCMSHC_RK3568) {
-			extra = DLL_CMDOUT_SRC_CLK_NEG |
-				DLL_CMDOUT_EN_SRC_CLK_NEG |
-				DWCMSHC_EMMC_DLL_DLYENA |
-				DLL_CMDOUT_TAPNUM_90_DEGREES |
-				DLL_CMDOUT_TAPNUM_FROM_SW;
-			sdhci_writel(host, extra, DECMSHC_EMMC_DLL_CMDOUT);
-		}
+		extra = DLL_CMDOUT_SRC_CLK_NEG |
+			DLL_CMDOUT_EN_SRC_CLK_NEG |
+			DWCMSHC_EMMC_DLL_DLYENA |
+			DLL_CMDOUT_TAPNUM_90_DEGREES |
+			DLL_CMDOUT_TAPNUM_FROM_SW;
+		sdhci_writel(host, extra, DECMSHC_EMMC_DLL_CMDOUT);
 	}
 
 	extra = DWCMSHC_EMMC_DLL_DLYENA |
@@ -814,10 +741,6 @@ static void rk35xx_sdhci_reset(struct sdhci_host *host, u8 mask)
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct dwcmshc_priv *dwc_priv = sdhci_pltfm_priv(pltfm_host);
 	struct rk35xx_priv *priv = dwc_priv->priv;
-	u32 extra = sdhci_readl(host, DECMSHC_EMMC_MISC_CON);
-
-	if ((host->mmc->caps2 & MMC_CAP2_CQE) && (mask & SDHCI_RESET_ALL))
-		cqhci_deactivate(host->mmc);
 
 	if (mask & SDHCI_RESET_ALL && priv->reset) {
 		reset_control_assert(priv->reset);
@@ -826,9 +749,6 @@ static void rk35xx_sdhci_reset(struct sdhci_host *host, u8 mask)
 	}
 
 	sdhci_reset(host, mask);
-
-	/* Enable INTERNAL CLOCK */
-	sdhci_writel(host, MISC_INTCLK_EN | extra, DECMSHC_EMMC_MISC_CON);
 }
 
 static int dwcmshc_rk35xx_init(struct device *dev, struct sdhci_host *host,
@@ -842,10 +762,10 @@ static int dwcmshc_rk35xx_init(struct device *dev, struct sdhci_host *host,
 	if (!priv)
 		return -ENOMEM;
 
-	if (of_device_is_compatible(dev->of_node, "rockchip,rk3568-dwcmshc"))
-		priv->devtype = DWCMSHC_RK3568;
-	else
+	if (of_device_is_compatible(dev->of_node, "rockchip,rk3588-dwcmshc"))
 		priv->devtype = DWCMSHC_RK3588;
+	else
+		priv->devtype = DWCMSHC_RK3568;
 
 	priv->reset = devm_reset_control_array_get_optional_exclusive(mmc_dev(host->mmc));
 	if (IS_ERR(priv->reset)) {
@@ -1272,16 +1192,6 @@ static const struct sdhci_ops sdhci_dwcmshc_rk35xx_ops = {
 	.irq			= dwcmshc_cqe_irq_handler,
 };
 
-static const struct sdhci_ops sdhci_dwcmshc_rk3528_ops = {
-	.set_clock		= dwcmshc_rk3568_set_clock,
-	.set_bus_width		= sdhci_set_bus_width,
-	.set_uhs_signaling	= dwcmshc_set_uhs_signaling,
-	.get_max_clock		= sdhci_pltfm_clk_get_max_clock,
-	.reset			= rk35xx_sdhci_reset,
-	.adma_write_desc	= dwcmshc_adma_write_desc,
-	.irq			= dwcmshc_cqe_irq_handler,
-};
-
 static const struct sdhci_ops sdhci_dwcmshc_th1520_ops = {
 	.set_clock		= sdhci_set_clock,
 	.set_bus_width		= sdhci_set_bus_width,
@@ -1332,31 +1242,9 @@ static const struct dwcmshc_pltfm_data sdhci_dwcmshc_bf3_pdata = {
 };
 #endif
 
-static const struct cqhci_host_ops rk35xx_cqhci_ops = {
-	.pre_enable	= rk35xx_sdhci_cqe_pre_enable,
-	.enable		= rk35xx_sdhci_cqe_enable,
-	.disable	= rk35xx_sdhci_cqe_disable,
-	.post_disable	= rk35xx_sdhci_cqe_post_disable,
-	.dumpregs	= dwcmshc_cqhci_dumpregs,
-	.set_tran_desc	= dwcmshc_set_tran_desc,
-};
-
 static const struct dwcmshc_pltfm_data sdhci_dwcmshc_rk35xx_pdata = {
 	.pdata = {
 		.ops = &sdhci_dwcmshc_rk35xx_ops,
-		.quirks = SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN |
-			  SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
-		.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
-			   SDHCI_QUIRK2_CLOCK_DIV_ZERO_BROKEN,
-	},
-	.cqhci_host_ops = &rk35xx_cqhci_ops,
-	.init = dwcmshc_rk35xx_init,
-	.postinit = dwcmshc_rk35xx_postinit,
-};
-
-static const struct dwcmshc_pltfm_data sdhci_dwcmshc_rk3528_pdata = {
-	.pdata = {
-		.ops = &sdhci_dwcmshc_rk3528_ops,
 		.quirks = SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN |
 			  SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
 		.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
@@ -1374,7 +1262,6 @@ static const struct dwcmshc_pltfm_data sdhci_dwcmshc_rk3576_pdata = {
 		.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
 			   SDHCI_QUIRK2_CLOCK_DIV_ZERO_BROKEN,
 	},
-	.cqhci_host_ops = &rk35xx_cqhci_ops,
 	.init = dwcmshc_rk35xx_init,
 	.postinit = dwcmshc_rk3576_postinit,
 };
@@ -1412,8 +1299,7 @@ static const struct cqhci_host_ops dwcmshc_cqhci_ops = {
 	.set_tran_desc	= dwcmshc_set_tran_desc,
 };
 
-static void dwcmshc_cqhci_init(struct sdhci_host *host, struct platform_device *pdev,
-			       const struct dwcmshc_pltfm_data *pltfm_data)
+static void dwcmshc_cqhci_init(struct sdhci_host *host, struct platform_device *pdev)
 {
 	struct cqhci_host *cq_host;
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
@@ -1443,10 +1329,7 @@ static void dwcmshc_cqhci_init(struct sdhci_host *host, struct platform_device *
 	}
 
 	cq_host->mmio = host->ioaddr + priv->vendor_specific_area2;
-	if (pltfm_data->cqhci_host_ops)
-		cq_host->ops = pltfm_data->cqhci_host_ops;
-	else
-		cq_host->ops = &dwcmshc_cqhci_ops;
+	cq_host->ops = &dwcmshc_cqhci_ops;
 
 	/* Enable using of 128-bit task descriptors */
 	dma64 = host->flags & SDHCI_USE_64_BIT_DMA;
@@ -1488,10 +1371,6 @@ static const struct of_device_id sdhci_dwcmshc_dt_ids[] = {
 	{
 		.compatible = "rockchip,rk3568-dwcmshc",
 		.data = &sdhci_dwcmshc_rk35xx_pdata,
-	},
- 	{
-		.compatible = "rockchip,rk3528-dwcmshc",
-		.data = &sdhci_dwcmshc_rk3528_pdata,
 	},
 	{
 		.compatible = "snps,dwcmshc-sdhci",
@@ -1619,7 +1498,7 @@ static int dwcmshc_probe(struct platform_device *pdev)
 		priv->vendor_specific_area2 =
 			sdhci_readw(host, DWCMSHC_P_VENDOR_AREA2);
 
-		dwcmshc_cqhci_init(host, pdev, pltfm_data);
+		dwcmshc_cqhci_init(host, pdev);
 	}
 
 	if (pltfm_data->postinit)
@@ -1799,7 +1678,7 @@ static struct platform_driver sdhci_dwcmshc_driver = {
 		.pm = &dwcmshc_pmops,
 	},
 	.probe	= dwcmshc_probe,
-	.remove = dwcmshc_remove,
+	.remove_new = dwcmshc_remove,
 };
 module_platform_driver(sdhci_dwcmshc_driver);
 

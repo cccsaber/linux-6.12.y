@@ -3642,7 +3642,7 @@ static struct platform_driver gfar_driver = {
 		.of_match_table = gfar_match,
 	},
 	.probe = gfar_probe,
-	.remove = gfar_remove,
+	.remove_new = gfar_remove,
 };
 
 module_platform_driver(gfar_driver);

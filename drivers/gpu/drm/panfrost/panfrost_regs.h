@@ -16,8 +16,6 @@
 #define   GROUPS_L2_COHERENT		BIT(0)	/* Cores groups are l2 coherent */
 
 #define GPU_MMU_FEATURES		0x014	/* (RO) MMU features */
-#define  GPU_MMU_FEATURES_VA_BITS(x)	((x) & GENMASK(7, 0))
-#define  GPU_MMU_FEATURES_PA_BITS(x)	(((x) >> 8) & GENMASK(7, 0))
 #define GPU_AS_PRESENT			0x018	/* (RO) Address space slots present */
 #define GPU_JS_PRESENT			0x01C	/* (RO) Job slots present */
 
@@ -80,8 +78,6 @@
 
 #define GPU_CYCLE_COUNT_LO		0x90
 #define GPU_CYCLE_COUNT_HI		0x94
-#define GPU_TIMESTAMP_LO		0x98
-#define GPU_TIMESTAMP_HI		0x9C
 
 #define GPU_THREAD_MAX_THREADS		0x0A0	/* (RO) Maximum number of threads per core */
 #define GPU_THREAD_MAX_WORKGROUP_SIZE	0x0A4	/* (RO) Maximum workgroup size */

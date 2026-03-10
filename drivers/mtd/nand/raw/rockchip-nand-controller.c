@@ -1492,7 +1492,7 @@ static const struct dev_pm_ops rk_nfc_pm_ops = {
 
 static struct platform_driver rk_nfc_driver = {
 	.probe = rk_nfc_probe,
-	.remove = rk_nfc_remove,
+	.remove_new = rk_nfc_remove,
 	.driver = {
 		.name = "rockchip-nfc",
 		.of_match_table = rk_nfc_id_table,
@@ -1505,3 +1505,4 @@ module_platform_driver(rk_nfc_driver);
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("Yifeng Zhao <yifeng.zhao@rock-chips.com>");
 MODULE_DESCRIPTION("Rockchip Nand Flash Controller Driver");
+MODULE_ALIAS("platform:rockchip-nand-controller");

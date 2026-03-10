@@ -1665,7 +1665,7 @@ static struct platform_driver omap2_mcspi_driver = {
 		.of_match_table = omap_mcspi_of_match,
 	},
 	.probe =	omap2_mcspi_probe,
-	.remove =	omap2_mcspi_remove,
+	.remove_new =	omap2_mcspi_remove,
 };
 
 module_platform_driver(omap2_mcspi_driver);

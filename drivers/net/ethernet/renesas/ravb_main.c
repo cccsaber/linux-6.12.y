@@ -3317,7 +3317,7 @@ static const struct dev_pm_ops ravb_dev_pm_ops = {
 
 static struct platform_driver ravb_driver = {
 	.probe		= ravb_probe,
-	.remove		= ravb_remove,
+	.remove_new	= ravb_remove,
 	.driver = {
 		.name	= "ravb",
 		.pm	= pm_ptr(&ravb_dev_pm_ops),

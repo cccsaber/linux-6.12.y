@@ -2479,7 +2479,7 @@ MODULE_DEVICE_TABLE(of, omap3isp_of_table);
 
 static struct platform_driver omap3isp_driver = {
 	.probe = isp_probe,
-	.remove = isp_remove,
+	.remove_new = isp_remove,
 	.id_table = omap3isp_id_table,
 	.driver = {
 		.name = "omap3isp",

@@ -315,10 +315,9 @@ static struct rockchip_clk_branch rk3328_clk_branches[] __initdata = {
 			RK3328_CLKGATE_CON(14), 1, GFLAGS),
 
 	/* PD_DDR */
-	COMPOSITE_DDRCLK(SCLK_DDRCLK, "sclk_ddrc", mux_ddrphy_p, 0,
-			RK3328_CLKSEL_CON(3), 8, 2, 0, 3,
-			ROCKCHIP_DDRCLK_SIP_V2),
-
+	COMPOSITE(0, "clk_ddr", mux_ddrphy_p, CLK_IGNORE_UNUSED,
+			RK3328_CLKSEL_CON(3), 8, 2, MFLAGS, 0, 3, DFLAGS | CLK_DIVIDER_POWER_OF_TWO,
+			RK3328_CLKGATE_CON(0), 4, GFLAGS),
 	GATE(0, "clk_ddrmsch", "clk_ddr", CLK_IGNORE_UNUSED,
 			RK3328_CLKGATE_CON(18), 6, GFLAGS),
 	GATE(0, "clk_ddrupctl", "clk_ddr", CLK_IGNORE_UNUSED,
@@ -678,9 +677,9 @@ static struct rockchip_clk_branch rk3328_clk_branches[] __initdata = {
 			RK3328_CLKSEL_CON(27), 15, 1, MFLAGS, 8, 5, DFLAGS,
 			RK3328_CLKGATE_CON(3), 5, GFLAGS),
 	MUXGRF(SCLK_MAC2IO, "clk_mac2io", mux_mac2io_src_p, CLK_SET_RATE_NO_REPARENT,
-			RK3328_GRF_MAC_CON1, 10, 1, MFLAGS, grf_type_sys),
+			RK3328_GRF_MAC_CON1, 10, 1, MFLAGS),
 	MUXGRF(SCLK_MAC2IO_EXT, "clk_mac2io_ext", mux_mac2io_ext_p, CLK_SET_RATE_NO_REPARENT,
-			RK3328_GRF_SOC_CON4, 14, 1, MFLAGS, grf_type_sys),
+			RK3328_GRF_SOC_CON4, 14, 1, MFLAGS),
 
 	COMPOSITE(SCLK_MAC2PHY_SRC, "clk_mac2phy_src", mux_2plls_p, 0,
 			RK3328_CLKSEL_CON(26), 7, 1, MFLAGS, 0, 5, DFLAGS,
@@ -693,7 +692,7 @@ static struct rockchip_clk_branch rk3328_clk_branches[] __initdata = {
 			RK3328_CLKSEL_CON(26), 8, 2, DFLAGS,
 			RK3328_CLKGATE_CON(9), 2, GFLAGS),
 	MUXGRF(SCLK_MAC2PHY, "clk_mac2phy", mux_mac2phy_src_p, CLK_SET_RATE_NO_REPARENT,
-			RK3328_GRF_MAC_CON2, 10, 1, MFLAGS, grf_type_sys),
+			RK3328_GRF_MAC_CON2, 10, 1, MFLAGS),
 
 	FACTOR(0, "xin12m", "xin24m", 0, 1, 2),
 

@@ -267,7 +267,7 @@ static struct platform_driver bcm2835aux_serial_driver = {
 		.pm = pm_ptr(&bcm2835aux_dev_pm_ops),
 	},
 	.probe  = bcm2835aux_serial_probe,
-	.remove = bcm2835aux_serial_remove,
+	.remove_new = bcm2835aux_serial_remove,
 };
 module_platform_driver(bcm2835aux_serial_driver);
 

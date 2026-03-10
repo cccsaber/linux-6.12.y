@@ -1476,7 +1476,7 @@ static struct platform_driver rcar_drif_driver = {
 		.pm = &rcar_drif_pm_ops,
 		},
 	.probe = rcar_drif_probe,
-	.remove = rcar_drif_remove,
+	.remove_new = rcar_drif_remove,
 };
 
 module_platform_driver(rcar_drif_driver);

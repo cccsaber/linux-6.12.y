@@ -287,7 +287,7 @@ static struct platform_driver hid_humidity_platform_driver = {
 		.pm	= &hid_sensor_pm_ops,
 	},
 	.probe		= hid_humidity_probe,
-	.remove		= hid_humidity_remove,
+	.remove_new	= hid_humidity_remove,
 };
 module_platform_driver(hid_humidity_platform_driver);
 

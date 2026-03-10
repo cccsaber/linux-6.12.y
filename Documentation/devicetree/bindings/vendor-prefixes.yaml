@@ -1251,7 +1251,7 @@ patternProperties:
   "^riscv,.*":
     description: RISC-V Foundation
   "^rockchip,.*":
-    description: Rockchip Electronics Co., Ltd.
+    description: Fuzhou Rockchip Electronics Co., Ltd
   "^rocktech,.*":
     description: ROCKTECH DISPLAYS LIMITED
   "^rohm,.*":
@@ -1266,8 +1266,6 @@ patternProperties:
     description: Recharge Véhicule Électrique (RVE) inc.
   "^saef,.*":
     description: Saef Technology Limited
-  "^sakurapi,.*":
-    description: SakuraPi.org
   "^samsung,.*":
     description: Samsung Semiconductor
   "^samtec,.*":
@@ -1506,8 +1504,6 @@ patternProperties:
     description: Texas Instruments
   "^tianma,.*":
     description: Tianma Micro-electronics Co., Ltd.
-  "^titanmec,.*":
-    description: Shenzhen Titan Micro Electronics Co., Ltd.
   "^tlm,.*":
     description: Trusted Logic Mobility
   "^tmt,.*":

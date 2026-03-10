@@ -157,16 +157,6 @@ int dw_pcie_get_resources(struct dw_pcie *pci)
 		}
 	}
 
-	/* ELBI is an optional resource */
-	if (!pci->elbi_base) {
-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "elbi");
-		if (res) {
-			pci->elbi_base = devm_ioremap_resource(pci->dev, res);
-			if (IS_ERR(pci->elbi_base))
-				return PTR_ERR(pci->elbi_base);
-		}
-	}
-
 	/* LLDD is supposed to manually switch the clocks and resets state */
 	if (dw_pcie_cap_is(pci, REQ_RES)) {
 		ret = dw_pcie_get_clocks(pci);
@@ -192,15 +182,6 @@ int dw_pcie_get_resources(struct dw_pcie *pci)
 void dw_pcie_version_detect(struct dw_pcie *pci)
 {
 	u32 ver;
-
-	/*
-	 * Some boards with Amlogic A311D SoC's AHCI controller breaks
-	 * if the version register is read.
-	 * Skip detection for some boards marked with skip-version-detect
-	 * in the device tree.
-	 */
-	if (of_property_read_bool(pci->dev->of_node, "skip-version-detect"))
-		return;
 
 	/* The content of the CSR is zero on DWC PCIe older than v4.70a */
 	ver = dw_pcie_readl_dbi(pci, PCIE_VERSION_NUMBER);
@@ -994,7 +975,7 @@ static int dw_pcie_edma_irq_verify(struct dw_pcie *pci)
 {
 	struct platform_device *pdev = to_platform_device(pci->dev);
 	u16 ch_cnt = pci->edma.ll_wr_cnt + pci->edma.ll_rd_cnt;
-	char name[15];
+	char name[6];
 	int ret;
 
 	if (pci->edma.nr_irqs > 1)
@@ -1087,30 +1068,6 @@ int dw_pcie_edma_detect(struct dw_pcie *pci)
 void dw_pcie_edma_remove(struct dw_pcie *pci)
 {
 	dw_edma_remove(&pci->edma);
-}
-
-void dw_pcie_hide_unsupported_l1ss(struct dw_pcie *pci)
-{
-	u16 l1ss;
-	u32 l1ss_cap;
-
-	if (pci->l1ss_support)
-		return;
-
-	l1ss = dw_pcie_find_ext_capability(pci, PCI_EXT_CAP_ID_L1SS);
-	if (!l1ss)
-		return;
-
-	/*
-	 * Unless the driver claims "l1ss_support", don't advertise L1 PM
-	 * Substates because they require CLKREQ# and possibly other
-	 * device-specific configuration.
-	 */
-	l1ss_cap = dw_pcie_readl_dbi(pci, l1ss + PCI_L1SS_CAP);
-	l1ss_cap &= ~(PCI_L1SS_CAP_PCIPM_L1_1 | PCI_L1SS_CAP_ASPM_L1_1 |
-		      PCI_L1SS_CAP_PCIPM_L1_2 | PCI_L1SS_CAP_ASPM_L1_2 |
-		      PCI_L1SS_CAP_L1_PM_SS);
-	dw_pcie_writel_dbi(pci, l1ss + PCI_L1SS_CAP, l1ss_cap);
 }
 
 void dw_pcie_setup(struct dw_pcie *pci)

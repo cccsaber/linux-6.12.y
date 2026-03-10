@@ -46,9 +46,7 @@ static int dwc_eth_dwmac_config_dt(struct platform_device *pdev,
 	u32 a_index = 0;
 
 	if (!plat_dat->axi) {
-		plat_dat->axi = devm_kzalloc(&pdev->dev,
-					     sizeof(struct stmmac_axi),
-					     GFP_KERNEL);
+		plat_dat->axi = kzalloc(sizeof(struct stmmac_axi), GFP_KERNEL);
 
 		if (!plat_dat->axi)
 			return -ENOMEM;
@@ -481,7 +479,7 @@ MODULE_DEVICE_TABLE(of, dwc_eth_dwmac_match);
 
 static struct platform_driver dwc_eth_dwmac_driver = {
 	.probe  = dwc_eth_dwmac_probe,
-	.remove = dwc_eth_dwmac_remove,
+	.remove_new = dwc_eth_dwmac_remove,
 	.driver = {
 		.name           = "dwc-eth-dwmac",
 		.pm             = &stmmac_pltfr_pm_ops,

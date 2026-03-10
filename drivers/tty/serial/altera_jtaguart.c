@@ -449,7 +449,7 @@ MODULE_DEVICE_TABLE(of, altera_jtaguart_match);
 
 static struct platform_driver altera_jtaguart_platform_driver = {
 	.probe	= altera_jtaguart_probe,
-	.remove = altera_jtaguart_remove,
+	.remove_new = altera_jtaguart_remove,
 	.driver	= {
 		.name		= DRV_NAME,
 		.of_match_table	= of_match_ptr(altera_jtaguart_match),

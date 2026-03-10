@@ -306,7 +306,7 @@ static struct platform_driver zmii_driver = {
 		.of_match_table = zmii_match,
 	},
 	.probe = zmii_probe,
-	.remove = zmii_remove,
+	.remove_new = zmii_remove,
 };
 
 int __init zmii_init(void)

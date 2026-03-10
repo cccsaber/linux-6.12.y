@@ -452,7 +452,7 @@ static struct platform_driver hid_accel_3d_platform_driver = {
 		.pm	= &hid_sensor_pm_ops,
 	},
 	.probe		= hid_accel_3d_probe,
-	.remove		= hid_accel_3d_remove,
+	.remove_new	= hid_accel_3d_remove,
 };
 module_platform_driver(hid_accel_3d_platform_driver);
 

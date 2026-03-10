@@ -308,29 +308,6 @@ static inline const char *phy_modes(phy_interface_t interface)
 	}
 }
 
-/**
- * rgmii_clock - map link speed to the clock rate
- * @speed: link speed value
- *
- * Description: maps RGMII supported link speeds
- * into the clock rates.
- *
- * Returns: clock rate or negative errno
- */
-static inline long rgmii_clock(int speed)
-{
-	switch (speed) {
-	case SPEED_10:
-		return 2500000;
-	case SPEED_100:
-		return 25000000;
-	case SPEED_1000:
-		return 125000000;
-	default:
-		return -EINVAL;
-	}
-}
-
 #define PHY_INIT_TIMEOUT	100000
 #define PHY_FORCE_TIMEOUT	10
 
@@ -1027,12 +1004,6 @@ struct phy_driver {
 
 	/** @handle_interrupt: Override default interrupt handling */
 	irqreturn_t (*handle_interrupt)(struct phy_device *phydev);
-
-	/*
-	 * Called before an ethernet device is detached
-	 * from the PHY.
-	 */
-	void (*detach)(struct phy_device *phydev);
 
 	/** @remove: Clears up any memory if needed */
 	void (*remove)(struct phy_device *phydev);

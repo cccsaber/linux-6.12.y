@@ -146,9 +146,10 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	ptdev->devfreq = pdevfreq;
 
 	ret = devm_pm_opp_set_regulators(dev, reg_names);
-	if (ret && ret != -ENODEV) {
+	if (ret) {
 		if (ret != -EPROBE_DEFER)
 			DRM_DEV_ERROR(dev, "Couldn't set OPP regulators\n");
+
 		return ret;
 	}
 
@@ -242,26 +243,26 @@ int panthor_devfreq_init(struct panthor_device *ptdev)
 	return 0;
 }
 
-void panthor_devfreq_resume(struct panthor_device *ptdev)
+int panthor_devfreq_resume(struct panthor_device *ptdev)
 {
 	struct panthor_devfreq *pdevfreq = ptdev->devfreq;
 
 	if (!pdevfreq->devfreq)
-		return;
+		return 0;
 
 	panthor_devfreq_reset(pdevfreq);
 
-	drm_WARN_ON(&ptdev->base, devfreq_resume_device(pdevfreq->devfreq));
+	return devfreq_resume_device(pdevfreq->devfreq);
 }
 
-void panthor_devfreq_suspend(struct panthor_device *ptdev)
+int panthor_devfreq_suspend(struct panthor_device *ptdev)
 {
 	struct panthor_devfreq *pdevfreq = ptdev->devfreq;
 
 	if (!pdevfreq->devfreq)
-		return;
+		return 0;
 
-	drm_WARN_ON(&ptdev->base, devfreq_suspend_device(pdevfreq->devfreq));
+	return devfreq_suspend_device(pdevfreq->devfreq);
 }
 
 void panthor_devfreq_record_busy(struct panthor_device *ptdev)

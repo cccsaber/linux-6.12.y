@@ -565,7 +565,7 @@ MODULE_DEVICE_TABLE(of, meson_i2c_match);
 
 static struct platform_driver meson_i2c_driver = {
 	.probe   = meson_i2c_probe,
-	.remove = meson_i2c_remove,
+	.remove_new = meson_i2c_remove,
 	.driver  = {
 		.name  = "meson-i2c",
 		.of_match_table = meson_i2c_match,

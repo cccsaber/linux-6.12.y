@@ -1157,7 +1157,7 @@ static struct platform_driver c8sectpfe_driver = {
 		.of_match_table = c8sectpfe_match,
 	},
 	.probe	= c8sectpfe_probe,
-	.remove = c8sectpfe_remove,
+	.remove_new = c8sectpfe_remove,
 };
 
 module_platform_driver(c8sectpfe_driver);

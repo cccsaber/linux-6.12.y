@@ -384,7 +384,7 @@ static struct platform_driver mac_driver = {
 		.of_match_table	= mac_match,
 	},
 	.probe		= mac_probe,
-	.remove		= mac_remove,
+	.remove_new	= mac_remove,
 };
 
 builtin_platform_driver(mac_driver);

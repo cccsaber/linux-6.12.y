@@ -778,7 +778,7 @@ static struct platform_driver mal_of_driver = {
 		.of_match_table = mal_platform_match,
 	},
 	.probe = mal_probe,
-	.remove = mal_remove,
+	.remove_new = mal_remove,
 };
 
 int __init mal_init(void)

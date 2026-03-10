@@ -10213,7 +10213,7 @@ static struct platform_driver niu_of_driver = {
 		.of_match_table = niu_match,
 	},
 	.probe		= niu_of_probe,
-	.remove		= niu_of_remove,
+	.remove_new	= niu_of_remove,
 };
 
 #endif /* CONFIG_SPARC64 */

@@ -101,10 +101,7 @@ properties:
   max-speed: true
 
   firmware-name:
-    minItems: 1
-    items:
-      - description: specify the name of nvm firmware to load
-      - description: specify the name of rampatch firmware to load
+    description: specify the name of nvm firmware to load
 
   local-bd-address: true
 
@@ -157,11 +154,16 @@ allOf:
               - qcom,wcn6750-bt
     then:
       required:
+        - enable-gpios
+        - swctrl-gpios
+        - vddio-supply
         - vddaon-supply
+        - vddbtcxmx-supply
         - vddrfacmn-supply
         - vddrfa0p8-supply
         - vddrfa1p7-supply
         - vddrfa1p2-supply
+        - vddasd-supply
   - if:
       properties:
         compatible:

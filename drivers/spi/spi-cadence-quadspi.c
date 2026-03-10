@@ -2139,7 +2139,7 @@ MODULE_DEVICE_TABLE(of, cqspi_dt_ids);
 
 static struct platform_driver cqspi_platform_driver = {
 	.probe = cqspi_probe,
-	.remove = cqspi_remove,
+	.remove_new = cqspi_remove,
 	.driver = {
 		.name = CQSPI_NAME,
 		.pm = pm_ptr(&cqspi_dev_pm_ops),

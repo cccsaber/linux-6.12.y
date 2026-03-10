@@ -761,7 +761,7 @@ static int ks_pcie_config_intx_irq(struct keystone_pcie *ks_pcie)
 						 ks_pcie);
 	}
 
-	intx_irq_domain = irq_domain_create_linear(of_fwnode_handle(intc_np), PCI_NUM_INTX,
+	intx_irq_domain = irq_domain_add_linear(intc_np, PCI_NUM_INTX,
 					&ks_pcie_intx_irq_domain_ops, NULL);
 	if (!intx_irq_domain) {
 		dev_err(dev, "Failed to add irq domain for INTX irqs\n");
@@ -1377,7 +1377,7 @@ static void ks_pcie_remove(struct platform_device *pdev)
 
 static struct platform_driver ks_pcie_driver = {
 	.probe  = ks_pcie_probe,
-	.remove = ks_pcie_remove,
+	.remove_new = ks_pcie_remove,
 	.driver = {
 		.name	= "keystone-pcie",
 		.of_match_table = ks_pcie_of_match,

@@ -64,7 +64,6 @@ int codec_hevc_setup_buffers(struct amvdec_session *sess,
 
 void codec_hevc_fill_mmu_map(struct amvdec_session *sess,
 			     struct codec_hevc_common *comm,
-			     struct vb2_buffer *vb,
-			     u32 is_10bit);
+			     struct vb2_buffer *vb);
 
 #endif

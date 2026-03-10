@@ -2682,7 +2682,7 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	sdhci_msm_handle_pwr_irq(host, 0);
 
 	/*
-	 * Ensure that above writes are propagated before interrupt enablement
+	 * Ensure that above writes are propogated before interrupt enablement
 	 * in GIC.
 	 */
 	mb();
@@ -2834,7 +2834,7 @@ static const struct dev_pm_ops sdhci_msm_pm_ops = {
 
 static struct platform_driver sdhci_msm_driver = {
 	.probe = sdhci_msm_probe,
-	.remove = sdhci_msm_remove,
+	.remove_new = sdhci_msm_remove,
 	.driver = {
 		   .name = "sdhci_msm",
 		   .of_match_table = sdhci_msm_dt_match,

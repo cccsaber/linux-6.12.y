@@ -303,7 +303,7 @@ static int mpc5121_rtc_probe(struct platform_device *op)
 		return PTR_ERR(rtc->regs);
 	}
 
-	device_init_wakeup(&op->dev, true);
+	device_init_wakeup(&op->dev, 1);
 
 	platform_set_drvdata(op, rtc);
 

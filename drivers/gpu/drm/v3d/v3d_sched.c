@@ -724,7 +724,7 @@ v3d_gpu_reset_for_timeout(struct v3d_dev *v3d, struct drm_sched_job *sched_job)
 
 	/* Unblock schedulers and restart their jobs. */
 	for (q = 0; q < V3D_MAX_QUEUES; q++) {
-		drm_sched_start(&v3d->queue[q].sched, 0);
+		drm_sched_start(&v3d->queue[q].sched);
 	}
 
 	mutex_unlock(&v3d->reset_lock);
@@ -849,54 +849,67 @@ static const struct drm_sched_backend_ops v3d_cpu_sched_ops = {
 	.free_job = v3d_cpu_job_free
 };
 
-static int
-v3d_queue_sched_init(struct v3d_dev *v3d, const struct drm_sched_backend_ops *ops,
-		     enum v3d_queue queue, const char *name)
-{
-	struct drm_sched_init_args args = {
-		.num_rqs = DRM_SCHED_PRIORITY_COUNT,
-		.credit_limit = 1,
-		.timeout = msecs_to_jiffies(500),
-		.dev = v3d->drm.dev,
-	};
-
-	args.ops = ops;
-	args.name = name;
-
-	return drm_sched_init(&v3d->queue[queue].sched, &args);
-}
-
 int
 v3d_sched_init(struct v3d_dev *v3d)
 {
+	int hw_jobs_limit = 1;
+	int job_hang_limit = 0;
+	int hang_limit_ms = 500;
 	int ret;
 
-	ret = v3d_queue_sched_init(v3d, &v3d_bin_sched_ops, V3D_BIN, "v3d_bin");
+	ret = drm_sched_init(&v3d->queue[V3D_BIN].sched,
+			     &v3d_bin_sched_ops, NULL,
+			     DRM_SCHED_PRIORITY_COUNT,
+			     hw_jobs_limit, job_hang_limit,
+			     msecs_to_jiffies(hang_limit_ms), NULL,
+			     NULL, "v3d_bin", v3d->drm.dev);
 	if (ret)
 		return ret;
 
-	ret = v3d_queue_sched_init(v3d, &v3d_render_sched_ops, V3D_RENDER,
-				   "v3d_render");
+	ret = drm_sched_init(&v3d->queue[V3D_RENDER].sched,
+			     &v3d_render_sched_ops, NULL,
+			     DRM_SCHED_PRIORITY_COUNT,
+			     hw_jobs_limit, job_hang_limit,
+			     msecs_to_jiffies(hang_limit_ms), NULL,
+			     NULL, "v3d_render", v3d->drm.dev);
 	if (ret)
 		goto fail;
 
-	ret = v3d_queue_sched_init(v3d, &v3d_tfu_sched_ops, V3D_TFU, "v3d_tfu");
+	ret = drm_sched_init(&v3d->queue[V3D_TFU].sched,
+			     &v3d_tfu_sched_ops, NULL,
+			     DRM_SCHED_PRIORITY_COUNT,
+			     hw_jobs_limit, job_hang_limit,
+			     msecs_to_jiffies(hang_limit_ms), NULL,
+			     NULL, "v3d_tfu", v3d->drm.dev);
 	if (ret)
 		goto fail;
 
 	if (v3d_has_csd(v3d)) {
-		ret = v3d_queue_sched_init(v3d, &v3d_csd_sched_ops, V3D_CSD,
-					   "v3d_csd");
+		ret = drm_sched_init(&v3d->queue[V3D_CSD].sched,
+				     &v3d_csd_sched_ops, NULL,
+				     DRM_SCHED_PRIORITY_COUNT,
+				     hw_jobs_limit, job_hang_limit,
+				     msecs_to_jiffies(hang_limit_ms), NULL,
+				     NULL, "v3d_csd", v3d->drm.dev);
 		if (ret)
 			goto fail;
 
-		ret = v3d_queue_sched_init(v3d, &v3d_cache_clean_sched_ops,
-					   V3D_CACHE_CLEAN, "v3d_cache_clean");
+		ret = drm_sched_init(&v3d->queue[V3D_CACHE_CLEAN].sched,
+				     &v3d_cache_clean_sched_ops, NULL,
+				     DRM_SCHED_PRIORITY_COUNT,
+				     hw_jobs_limit, job_hang_limit,
+				     msecs_to_jiffies(hang_limit_ms), NULL,
+				     NULL, "v3d_cache_clean", v3d->drm.dev);
 		if (ret)
 			goto fail;
 	}
 
-	ret = v3d_queue_sched_init(v3d, &v3d_cpu_sched_ops, V3D_CPU, "v3d_cpu");
+	ret = drm_sched_init(&v3d->queue[V3D_CPU].sched,
+			     &v3d_cpu_sched_ops, NULL,
+			     DRM_SCHED_PRIORITY_COUNT,
+			     1, job_hang_limit,
+			     msecs_to_jiffies(hang_limit_ms), NULL,
+			     NULL, "v3d_cpu", v3d->drm.dev);
 	if (ret)
 		goto fail;
 

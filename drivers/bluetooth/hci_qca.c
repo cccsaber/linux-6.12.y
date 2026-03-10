@@ -31,7 +31,6 @@
 #include <linux/pwrseq/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/serdev.h>
-#include <linux/string_choices.h>
 #include <linux/mutex.h>
 #include <linux/unaligned.h>
 
@@ -333,8 +332,8 @@ static void serial_clock_vote(unsigned long vote, struct hci_uart *hu)
 		else
 			__serial_clock_off(hu->tty);
 
-		BT_DBG("Vote serial clock %s(%s)", str_true_false(new_vote),
-		       str_true_false(vote));
+		BT_DBG("Vote serial clock %s(%s)", new_vote ? "true" : "false",
+		       vote ? "true" : "false");
 
 		diff = jiffies_to_msecs(jiffies - qca->vote_last_jif);
 
@@ -874,7 +873,7 @@ static void device_woke_up(struct hci_uart *hu)
 	hci_uart_tx_wakeup(hu);
 }
 
-/* Enqueue frame for transmission (padding, crc, etc) may be called from
+/* Enqueue frame for transmittion (padding, crc, etc) may be called from
  * two simultaneous tasklets.
  */
 static int qca_enqueue(struct hci_uart *hu, struct sk_buff *skb)
@@ -1060,7 +1059,7 @@ static void qca_controller_memdump(struct work_struct *work)
 		if (!seq_no) {
 
 			/* This is the first frame of memdump packet from
-			 * the controller, Disable IBS to receive dump
+			 * the controller, Disable IBS to recevie dump
 			 * with out any interruption, ideally time required for
 			 * the controller to send the dump is 8 seconds. let us
 			 * start timer to handle this asynchronous activity.
@@ -1639,7 +1638,7 @@ static void qca_hw_error(struct hci_dev *hdev, u8 code)
 	clear_bit(QCA_HW_ERROR_EVENT, &qca->flags);
 }
 
-static void qca_reset(struct hci_dev *hdev)
+static void qca_cmd_timeout(struct hci_dev *hdev)
 {
 	struct hci_uart *hu = hci_get_drvdata(hdev);
 	struct qca_data *qca = hu->priv;
@@ -1969,7 +1968,7 @@ retry:
 		clear_bit(QCA_IBS_DISABLED, &qca->flags);
 		qca_debugfs_init(hdev);
 		hu->hdev->hw_error = qca_hw_error;
-		hu->hdev->reset = qca_reset;
+		hu->hdev->cmd_timeout = qca_cmd_timeout;
 		if (hu->serdev) {
 			if (device_can_wakeup(hu->serdev->ctrl->dev.parent))
 				hu->hdev->wakeup = qca_wakeup;
@@ -2207,7 +2206,7 @@ static int qca_power_off(struct hci_dev *hdev)
 	enum qca_btsoc_type soc_type = qca_soc_type(hu);
 
 	hu->hdev->hw_error = NULL;
-	hu->hdev->reset = NULL;
+	hu->hdev->cmd_timeout = NULL;
 
 	del_timer_sync(&qca->wake_retrans_timer);
 	del_timer_sync(&qca->tx_idle_timer);
@@ -2299,6 +2298,13 @@ static int qca_init_regulators(struct qca_power *qca,
 	return 0;
 }
 
+static void qca_clk_disable_unprepare(void *data)
+{
+	struct clk *clk = data;
+
+	clk_disable_unprepare(clk);
+}
+
 static int qca_serdev_probe(struct serdev_device *serdev)
 {
 	struct qca_serdev *qcadev;
@@ -2357,7 +2363,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 			 * Backward compatibility with old DT sources. If the
 			 * node doesn't have the 'enable-gpios' property then
 			 * let's use the power sequencer. Otherwise, let's
-			 * drive everything ourselves.
+			 * drive everything outselves.
 			 */
 			qcadev->bt_power->pwrseq = devm_pwrseq_get(&serdev->dev,
 								   "bluetooth");
@@ -2438,12 +2444,25 @@ static int qca_serdev_probe(struct serdev_device *serdev)
 		if (!qcadev->bt_en)
 			power_ctrl_enabled = false;
 
-		qcadev->susclk = devm_clk_get_optional_enabled_with_rate(
-					&serdev->dev, NULL, SUSCLK_RATE_32KHZ);
+		qcadev->susclk = devm_clk_get_optional(&serdev->dev, NULL);
 		if (IS_ERR(qcadev->susclk)) {
 			dev_warn(&serdev->dev, "failed to acquire clk\n");
 			return PTR_ERR(qcadev->susclk);
 		}
+		err = clk_set_rate(qcadev->susclk, SUSCLK_RATE_32KHZ);
+		if (err)
+			return err;
+
+		err = clk_prepare_enable(qcadev->susclk);
+		if (err)
+			return err;
+
+		err = devm_add_action_or_reset(&serdev->dev,
+					       qca_clk_disable_unprepare,
+					       qcadev->susclk);
+		if (err)
+			return err;
+
 	}
 	
 	err = hci_uart_register_device(&qcadev->serdev_hu, &qca_proto);
@@ -2522,7 +2541,7 @@ static void qca_serdev_shutdown(struct device *dev)
 		    hci_dev_test_flag(hdev, HCI_SETUP))
 			return;
 
-		/* The serdev must be in open state when control logic arrives
+		/* The serdev must be in open state when conrol logic arrives
 		 * here, so also fix the use-after-free issue caused by that
 		 * the serdev is flushed or wrote after it is closed.
 		 */

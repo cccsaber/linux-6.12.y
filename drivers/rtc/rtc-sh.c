@@ -617,7 +617,7 @@ static int __init sh_rtc_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_unmap;
 
-	device_init_wakeup(&pdev->dev, true);
+	device_init_wakeup(&pdev->dev, 1);
 	return 0;
 
 err_unmap:

@@ -508,7 +508,7 @@ static int ds3232_probe(struct device *dev, struct regmap *regmap, int irq,
 		return ret;
 
 	if (ds3232->irq > 0)
-		device_init_wakeup(dev, true);
+		device_init_wakeup(dev, 1);
 
 	ds3232_hwmon_register(dev, name);
 

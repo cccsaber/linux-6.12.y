@@ -2718,7 +2718,7 @@ MODULE_DEVICE_TABLE(of, unicam_of_match);
 
 static struct platform_driver unicam_driver = {
 	.probe		= unicam_probe,
-	.remove		= unicam_remove,
+	.remove_new	= unicam_remove,
 	.driver = {
 		.name	= UNICAM_MODULE_NAME,
 		.pm	= pm_ptr(&unicam_pm_ops),

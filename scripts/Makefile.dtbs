@@ -51,17 +51,11 @@ quiet_cmd_wrap_S_dtb = WRAP    $@
 		echo '.balign STRUCT_ALIGNMENT';					\
 	} > $@
 
-quiet_cmd_scr = MKIMAGE $@
-cmd_scr = mkimage -C none -A $(ARCH) -T script -d $< $@
-
 $(obj)/%.dtb.S: $(obj)/%.dtb FORCE
 	$(call if_changed,wrap_S_dtb)
 
 $(obj)/%.dtbo.S: $(obj)/%.dtbo FORCE
 	$(call if_changed,wrap_S_dtb)
-
-$(obj)/%.scr: $(src)/%.scr-cmd FORCE
-	$(call if_changed,scr)
 
 # Schema check
 # ---------------------------------------------------------------------------
@@ -128,7 +122,7 @@ dtc-tmp = $(subst $(comma),_,$(dot-target).dts.tmp)
 quiet_cmd_dtc = DTC $(quiet_dtb_check_tag) $@
       cmd_dtc = \
 	$(HOSTCC) -E $(dtc_cpp_flags) -x assembler-with-cpp -o $(dtc-tmp) $< ; \
-	$(DTC) -@ -o $@ -b 0 $(addprefix -i,$(dir $<) $(DTC_INCLUDE)) \
+	$(DTC) -o $@ -b 0 $(addprefix -i,$(dir $<) $(DTC_INCLUDE)) \
 	       $(DTC_FLAGS) -d $(depfile).dtc.tmp $(dtc-tmp) ; \
 	cat $(depfile).pre.tmp $(depfile).dtc.tmp > $(depfile) \
 	$(cmd_dtb_check)

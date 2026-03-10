@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/regmap.h>
 
+#include "meson8b.h"
 #include "clk-regmap.h"
 #include "meson-clkc-utils.h"
 #include "clk-pll.h"
@@ -24,71 +25,7 @@
 #include <dt-bindings/clock/meson8b-clkc.h>
 #include <dt-bindings/reset/amlogic,meson8b-clkc-reset.h>
 
-/*
- * Clock controller register offsets
- *
- * Register offsets from the HardKernel[0] data sheet must be multiplied
- * by 4 before adding them to the base address to get the right value
- *
- * [0] https://dn.odroid.com/S805/Datasheet/S805_Datasheet%20V0.8%2020150126.pdf
- */
-#define HHI_GP_PLL_CNTL			0x40
-#define HHI_GP_PLL_CNTL2		0x44
-#define HHI_GP_PLL_CNTL3		0x48
-#define HHI_GP_PLL_CNTL4		0x4C
-#define HHI_GP_PLL_CNTL5		0x50
-#define HHI_VIID_CLK_DIV		0x128
-#define HHI_VIID_CLK_CNTL		0x12c
-#define HHI_GCLK_MPEG0			0x140
-#define HHI_GCLK_MPEG1			0x144
-#define HHI_GCLK_MPEG2			0x148
-#define HHI_GCLK_OTHER			0x150
-#define HHI_GCLK_AO			0x154
-#define HHI_SYS_CPU_CLK_CNTL1		0x15c
-#define HHI_VID_CLK_DIV			0x164
-#define HHI_MPEG_CLK_CNTL		0x174
-#define HHI_AUD_CLK_CNTL		0x178
-#define HHI_VID_CLK_CNTL		0x17c
-#define HHI_AUD_CLK_CNTL2		0x190
-#define HHI_VID_CLK_CNTL2		0x194
-#define HHI_VID_DIVIDER_CNTL		0x198
-#define HHI_SYS_CPU_CLK_CNTL0		0x19c
-#define HHI_MALI_CLK_CNTL		0x1b0
-#define HHI_VPU_CLK_CNTL		0x1bc
-#define HHI_HDMI_CLK_CNTL		0x1cc
-#define HHI_VDEC_CLK_CNTL		0x1e0
-#define HHI_VDEC2_CLK_CNTL		0x1e4
-#define HHI_VDEC3_CLK_CNTL		0x1e8
-#define HHI_NAND_CLK_CNTL		0x25c
-#define HHI_MPLL_CNTL			0x280
-#define HHI_SYS_PLL_CNTL		0x300
-#define HHI_VID_PLL_CNTL		0x320
-#define HHI_VID_PLL_CNTL2		0x324
-#define HHI_VID_PLL_CNTL3		0x328
-#define HHI_VID_PLL_CNTL4		0x32c
-#define HHI_VID_PLL_CNTL5		0x330
-#define HHI_VID_PLL_CNTL6		0x334
-#define HHI_VID2_PLL_CNTL		0x380
-#define HHI_VID2_PLL_CNTL2		0x384
-#define HHI_VID2_PLL_CNTL3		0x388
-#define HHI_VID2_PLL_CNTL4		0x38c
-#define HHI_VID2_PLL_CNTL5		0x390
-#define HHI_VID2_PLL_CNTL6		0x394
-
-/*
- * MPLL register offeset taken from the S905 datasheet. Vendor kernel source
- * confirm these are the same for the S805.
- */
-#define HHI_MPLL_CNTL			0x280
-#define HHI_MPLL_CNTL2			0x284
-#define HHI_MPLL_CNTL3			0x288
-#define HHI_MPLL_CNTL4			0x28c
-#define HHI_MPLL_CNTL5			0x290
-#define HHI_MPLL_CNTL6			0x294
-#define HHI_MPLL_CNTL7			0x298
-#define HHI_MPLL_CNTL8			0x29c
-#define HHI_MPLL_CNTL9			0x2a0
-#define HHI_MPLL_CNTL10			0x2a4
+static DEFINE_SPINLOCK(meson_clk_lock);
 
 struct meson8b_clk_reset {
 	struct reset_controller_dev reset;
@@ -555,6 +492,7 @@ static struct clk_regmap meson8b_mpll0_div = {
 			.shift   = 25,
 			.width   = 1,
 		},
+		.lock = &meson_clk_lock,
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "mpll0_div",
@@ -599,6 +537,7 @@ static struct clk_regmap meson8b_mpll1_div = {
 			.shift   = 16,
 			.width   = 9,
 		},
+		.lock = &meson_clk_lock,
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "mpll1_div",
@@ -643,6 +582,7 @@ static struct clk_regmap meson8b_mpll2_div = {
 			.shift   = 16,
 			.width   = 9,
 		},
+		.lock = &meson_clk_lock,
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "mpll2_div",
@@ -3762,6 +3702,7 @@ static int meson8b_clk_reset_update(struct reset_controller_dev *rcdev,
 		container_of(rcdev, struct meson8b_clk_reset, reset);
 	const struct meson8b_clk_reset_line *reset;
 	unsigned int value = 0;
+	unsigned long flags;
 
 	if (id >= ARRAY_SIZE(meson8b_clk_reset_bits))
 		return -EINVAL;
@@ -3771,8 +3712,12 @@ static int meson8b_clk_reset_update(struct reset_controller_dev *rcdev,
 	if (assert != reset->active_low)
 		value = BIT(reset->bit_idx);
 
+	spin_lock_irqsave(&meson_clk_lock, flags);
+
 	regmap_update_bits(meson8b_clk_reset->regmap, reset->reg,
 			   BIT(reset->bit_idx), value);
+
+	spin_unlock_irqrestore(&meson_clk_lock, flags);
 
 	return 0;
 }

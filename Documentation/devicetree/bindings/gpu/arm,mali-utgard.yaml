@@ -46,7 +46,6 @@ properties:
               - hisilicon,hi6220-mali
               - mediatek,mt7623-mali
               - rockchip,rk3328-mali
-              - rockchip,rk3528-mali
           - const: arm,mali-450
 
       # "arm,mali-300"
@@ -148,7 +147,6 @@ allOf:
               - rockchip,rk3188-mali
               - rockchip,rk3228-mali
               - rockchip,rk3328-mali
-              - rockchip,rk3528-mali
     then:
       required:
         - resets

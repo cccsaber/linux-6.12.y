@@ -2132,7 +2132,7 @@ MODULE_DEVICE_TABLE(of, stfsm_match);
 
 static struct platform_driver stfsm_driver = {
 	.probe		= stfsm_probe,
-	.remove		= stfsm_remove,
+	.remove_new	= stfsm_remove,
 	.driver		= {
 		.name	= "st-spi-fsm",
 		.of_match_table = stfsm_match,

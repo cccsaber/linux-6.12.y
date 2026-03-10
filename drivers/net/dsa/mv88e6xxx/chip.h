@@ -13,9 +13,7 @@
 #include <linux/irq.h>
 #include <linux/gpio/consumer.h>
 #include <linux/kthread.h>
-#include <linux/leds.h>
 #include <linux/phy.h>
-#include <linux/property.h>
 #include <linux/ptp_clock_kernel.h>
 #include <linux/timecounter.h>
 #include <net/dsa.h>
@@ -144,7 +142,6 @@ struct mv88e6xxx_info {
 	unsigned int age_time_coeff;
 	unsigned int g1_irqs;
 	unsigned int g2_irqs;
-	int stats_type;
 	bool pvt;
 
 	/* Mark certain ports as invalid. This is required for example for the
@@ -279,7 +276,6 @@ struct mv88e6xxx_vlan {
 struct mv88e6xxx_port {
 	struct mv88e6xxx_chip *chip;
 	int port;
-	struct fwnode_handle *fwnode;
 	struct mv88e6xxx_vlan bridge_pvid;
 	u64 serdes_stats[2];
 	u64 atu_member_violation;
@@ -293,11 +289,6 @@ struct mv88e6xxx_port {
 	bool mirror_egress;
 	struct devlink_region *region;
 	void *pcs_private;
-
-	/* LED related information */
-	bool fiber;
-	struct led_classdev led0;
-	struct led_classdev led1;
 
 	/* MacAuth Bypass control flag */
 	bool mab;
@@ -443,9 +434,6 @@ struct mv88e6xxx_chip {
 
 	/* Bridge MST to SID mappings */
 	struct list_head msts;
-
-	/* FID map */
-	DECLARE_BITMAP(fid_bitmap, MV88E6XXX_N_FID);
 };
 
 struct mv88e6xxx_bus_ops {
@@ -585,9 +573,6 @@ struct mv88e6xxx_ops {
 	int (*port_set_cmode)(struct mv88e6xxx_chip *chip, int port,
 			      phy_interface_t mode);
 	int (*port_get_cmode)(struct mv88e6xxx_chip *chip, int port, u8 *cmode);
-
-	/* LED control */
-	int (*port_setup_leds)(struct mv88e6xxx_chip *chip, int port);
 
 	/* Some devices have a per port register indicating what is
 	 * the upstream port this port should forward to.
@@ -844,5 +829,7 @@ int mv88e6xxx_vtu_walk(struct mv88e6xxx_chip *chip,
 				 const struct mv88e6xxx_vtu_entry *entry,
 				 void *priv),
 		       void *priv);
+
+int mv88e6xxx_fid_map(struct mv88e6xxx_chip *chip, unsigned long *bitmap);
 
 #endif /* _MV88E6XXX_CHIP_H */

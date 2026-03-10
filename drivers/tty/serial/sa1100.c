@@ -880,7 +880,7 @@ static void sa1100_serial_remove(struct platform_device *pdev)
 
 static struct platform_driver sa11x0_serial_driver = {
 	.probe		= sa1100_serial_probe,
-	.remove		= sa1100_serial_remove,
+	.remove_new	= sa1100_serial_remove,
 	.suspend	= sa1100_serial_suspend,
 	.resume		= sa1100_serial_resume,
 	.driver		= {

@@ -88,6 +88,9 @@
 
 #define JOB_TIMEOUT_MS				5000
 
+#define MIN_CS_PER_CSG				8
+
+#define MIN_CSGS				3
 #define MAX_CSG_PRIO				0xf
 
 #define NUM_INSTRS_PER_CACHE_LINE		(64 / sizeof(u64))
@@ -137,6 +140,8 @@ enum panthor_csg_priority {
 	 * non-real-time groups. When such a group becomes executable,
 	 * it will evict the group with the lowest non-rt priority if
 	 * there's no free group slot available.
+	 *
+	 * Currently not exposed to userspace.
 	 */
 	PANTHOR_CSG_PRIORITY_RT,
 
@@ -358,9 +363,6 @@ struct panthor_queue {
 
 	/** @entity: DRM scheduling entity used for this queue. */
 	struct drm_sched_entity entity;
-
-	/** @name: DRM scheduler name for this queue. */
-	char *name;
 
 	/**
 	 * @remaining_time: Time remaining before the job timeout expires.
@@ -609,16 +611,6 @@ struct panthor_group {
 	 * object.
 	 */
 	bool timedout;
-
-	/**
-	 * @innocent: True when the group becomes unusable because the group suspension
-	 * failed during a reset.
-	 *
-	 * Sometimes the FW was put in a bad state by other groups, causing the group
-	 * suspension happening in the reset path to fail. In that case, we consider the
-	 * group innocent.
-	 */
-	bool innocent;
 
 	/**
 	 * @syncobjs: Pool of per-queue synchronization objects.
@@ -878,8 +870,6 @@ static void group_free_queue(struct panthor_group *group, struct panthor_queue *
 
 	if (queue->scheduler.ops)
 		drm_sched_fini(&queue->scheduler);
-
-	kfree(queue->name);
 
 	panthor_queue_put_syncwait_obj(queue);
 
@@ -2334,7 +2324,7 @@ static void tick_work(struct work_struct *work)
 	if (!drm_dev_enter(&ptdev->base, &cookie))
 		return;
 
-	ret = panthor_device_resume_and_get(ptdev);
+	ret = pm_runtime_resume_and_get(ptdev->base.dev);
 	if (drm_WARN_ON(&ptdev->base, ret))
 		goto out_dev_exit;
 
@@ -2612,7 +2602,7 @@ static void queue_start(struct panthor_queue *queue)
 	list_for_each_entry(job, &queue->scheduler.pending_list, base.list)
 		job->base.s_fence->parent = dma_fence_get(job->done_fence);
 
-	drm_sched_start(&queue->scheduler, 0);
+	drm_sched_start(&queue->scheduler);
 }
 
 static void panthor_group_stop(struct panthor_group *group)
@@ -2722,12 +2712,6 @@ void panthor_sched_suspend(struct panthor_device *ptdev)
 		while (slot_mask) {
 			u32 csg_id = ffs(slot_mask) - 1;
 			struct panthor_csg_slot *csg_slot = &sched->csg_slots[csg_id];
-
-			/* If the group was still usable before that point, we consider
-			 * it innocent.
-			 */
-			if (group_can_run(csg_slot->group))
-				csg_slot->group->innocent = true;
 
 			/* We consider group suspension failures as fatal and flag the
 			 * group as unusable by setting timedout=true.
@@ -3117,7 +3101,7 @@ queue_run_job(struct drm_sched_job *sched_job)
 		return dma_fence_get(job->done_fence);
 	}
 
-	ret = panthor_device_resume_and_get(ptdev);
+	ret = pm_runtime_resume_and_get(ptdev->base.dev);
 	if (drm_WARN_ON(&ptdev->base, ret))
 		return ERR_PTR(ret);
 
@@ -3283,24 +3267,8 @@ static u32 calc_profiling_ringbuf_num_slots(struct panthor_device *ptdev,
 
 static struct panthor_queue *
 group_create_queue(struct panthor_group *group,
-		   const struct drm_panthor_queue_create *args,
-		   u64 drm_client_id, u32 gid, u32 qid)
+		   const struct drm_panthor_queue_create *args)
 {
-	struct drm_sched_init_args sched_args = {
-		.ops = &panthor_queue_sched_ops,
-		.submit_wq = group->ptdev->scheduler->wq,
-		.num_rqs = 1,
-		/*
-		 * The credit limit argument tells us the total number of
-		 * instructions across all CS slots in the ringbuffer, with
-		 * some jobs requiring twice as many as others, depending on
-		 * their profiling status.
-		 */
-		.credit_limit = args->ringbuf_size / sizeof(u64),
-		.timeout = msecs_to_jiffies(JOB_TIMEOUT_MS),
-		.timeout_wq = group->ptdev->reset.wq,
-		.dev = group->ptdev->base.dev,
-	};
 	struct drm_gpu_scheduler *drm_sched;
 	struct panthor_queue *queue;
 	int ret;
@@ -3330,8 +3298,7 @@ group_create_queue(struct panthor_group *group,
 						  DRM_PANTHOR_BO_NO_MMAP,
 						  DRM_PANTHOR_VM_BIND_OP_MAP_NOEXEC |
 						  DRM_PANTHOR_VM_BIND_OP_MAP_UNCACHED,
-						  PANTHOR_VM_KERNEL_AUTO_VA,
-						  "CS ring buffer");
+						  PANTHOR_VM_KERNEL_AUTO_VA);
 	if (IS_ERR(queue->ringbuf)) {
 		ret = PTR_ERR(queue->ringbuf);
 		goto err_free_queue;
@@ -3361,8 +3328,7 @@ group_create_queue(struct panthor_group *group,
 					 DRM_PANTHOR_BO_NO_MMAP,
 					 DRM_PANTHOR_VM_BIND_OP_MAP_NOEXEC |
 					 DRM_PANTHOR_VM_BIND_OP_MAP_UNCACHED,
-					 PANTHOR_VM_KERNEL_AUTO_VA,
-					 "Group job stats");
+					 PANTHOR_VM_KERNEL_AUTO_VA);
 
 	if (IS_ERR(queue->profiling.slots)) {
 		ret = PTR_ERR(queue->profiling.slots);
@@ -3373,16 +3339,17 @@ group_create_queue(struct panthor_group *group,
 	if (ret)
 		goto err_free_queue;
 
-	/* assign a unique name */
-	queue->name = kasprintf(GFP_KERNEL, "panthor-queue-%llu-%u-%u", drm_client_id, gid, qid);
-	if (!queue->name) {
-		ret = -ENOMEM;
-		goto err_free_queue;
-	}
-
-	sched_args.name = queue->name;
-
-	ret = drm_sched_init(&queue->scheduler, &sched_args);
+	/*
+	 * Credit limit argument tells us the total number of instructions
+	 * across all CS slots in the ringbuffer, with some jobs requiring
+	 * twice as many as others, depending on their profiling status.
+	 */
+	ret = drm_sched_init(&queue->scheduler, &panthor_queue_sched_ops,
+			     group->ptdev->scheduler->wq, 1,
+			     args->ringbuf_size / sizeof(u64),
+			     0, msecs_to_jiffies(JOB_TIMEOUT_MS),
+			     group->ptdev->reset.wq,
+			     NULL, "panthor-queue", group->ptdev->base.dev);
 	if (ret)
 		goto err_free_queue;
 
@@ -3402,8 +3369,7 @@ err_free_queue:
 
 int panthor_group_create(struct panthor_file *pfile,
 			 const struct drm_panthor_group_create *group_args,
-			 const struct drm_panthor_queue_create *queue_args,
-			 u64 drm_client_id)
+			 const struct drm_panthor_queue_create *queue_args)
 {
 	struct panthor_device *ptdev = pfile->ptdev;
 	struct panthor_group_pool *gpool = pfile->groups;
@@ -3482,8 +3448,7 @@ int panthor_group_create(struct panthor_file *pfile,
 						   DRM_PANTHOR_BO_NO_MMAP,
 						   DRM_PANTHOR_VM_BIND_OP_MAP_NOEXEC |
 						   DRM_PANTHOR_VM_BIND_OP_MAP_UNCACHED,
-						   PANTHOR_VM_KERNEL_AUTO_VA,
-						   "Group sync objects");
+						   PANTHOR_VM_KERNEL_AUTO_VA);
 	if (IS_ERR(group->syncobjs)) {
 		ret = PTR_ERR(group->syncobjs);
 		goto err_put_group;
@@ -3496,22 +3461,22 @@ int panthor_group_create(struct panthor_file *pfile,
 	memset(group->syncobjs->kmap, 0,
 	       group_args->queues.count * sizeof(struct panthor_syncobj_64b));
 
-	ret = xa_alloc(&gpool->xa, &gid, group, XA_LIMIT(1, MAX_GROUPS_PER_POOL), GFP_KERNEL);
-	if (ret)
-		goto err_put_group;
-
 	for (i = 0; i < group_args->queues.count; i++) {
-		group->queues[i] = group_create_queue(group, &queue_args[i], drm_client_id, gid, i);
+		group->queues[i] = group_create_queue(group, &queue_args[i]);
 		if (IS_ERR(group->queues[i])) {
 			ret = PTR_ERR(group->queues[i]);
 			group->queues[i] = NULL;
-			goto err_erase_gid;
+			goto err_put_group;
 		}
 
 		group->queue_count++;
 	}
 
 	group->idle_queues = GENMASK(group->queue_count - 1, 0);
+
+	ret = xa_alloc(&gpool->xa, &gid, group, XA_LIMIT(1, MAX_GROUPS_PER_POOL), GFP_KERNEL);
+	if (ret)
+		goto err_put_group;
 
 	mutex_lock(&sched->reset.lock);
 	if (atomic_read(&sched->reset.in_progress)) {
@@ -3525,9 +3490,6 @@ int panthor_group_create(struct panthor_file *pfile,
 	mutex_unlock(&sched->reset.lock);
 
 	return gid;
-
-err_erase_gid:
-	xa_erase(&gpool->xa, gid);
 
 err_put_group:
 	group_put(group);
@@ -3601,8 +3563,6 @@ int panthor_group_get_state(struct panthor_file *pfile,
 		get_state->state |= DRM_PANTHOR_GROUP_STATE_FATAL_FAULT;
 		get_state->fatal_queues = group->fatal_queues;
 	}
-	if (group->innocent)
-		get_state->state |= DRM_PANTHOR_GROUP_STATE_INNOCENT;
 	mutex_unlock(&sched->lock);
 
 	group_put(group);

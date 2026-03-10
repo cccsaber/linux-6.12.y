@@ -1216,7 +1216,7 @@ static struct platform_driver tegra_slink_driver = {
 		.of_match_table	= tegra_slink_of_match,
 	},
 	.probe =	tegra_slink_probe,
-	.remove =	tegra_slink_remove,
+	.remove_new =	tegra_slink_remove,
 };
 module_platform_driver(tegra_slink_driver);
 

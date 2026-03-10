@@ -1359,7 +1359,7 @@ static void sh_vou_remove(struct platform_device *pdev)
 }
 
 static struct platform_driver sh_vou = {
-	.remove = sh_vou_remove,
+	.remove_new = sh_vou_remove,
 	.driver  = {
 		.name	= "sh-vou",
 	},

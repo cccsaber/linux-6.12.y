@@ -1332,7 +1332,7 @@ static const struct dev_pm_ops cal_pm_ops = {
 
 static struct platform_driver cal_pdrv = {
 	.probe		= cal_probe,
-	.remove		= cal_remove,
+	.remove_new	= cal_remove,
 	.driver		= {
 		.name	= CAL_MODULE_NAME,
 		.pm	= &cal_pm_ops,

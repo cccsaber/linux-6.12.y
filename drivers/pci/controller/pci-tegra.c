@@ -2799,6 +2799,6 @@ static struct platform_driver tegra_pcie_driver = {
 		.pm = &tegra_pcie_pm_ops,
 	},
 	.probe = tegra_pcie_probe,
-	.remove = tegra_pcie_remove,
+	.remove_new = tegra_pcie_remove,
 };
 module_platform_driver(tegra_pcie_driver);

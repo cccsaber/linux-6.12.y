@@ -1856,7 +1856,7 @@ static struct platform_driver rtl8366rb_smi_driver = {
 		.of_match_table = rtl8366rb_of_match,
 	},
 	.probe  = realtek_smi_probe,
-	.remove = realtek_smi_remove,
+	.remove_new = realtek_smi_remove,
 	.shutdown = realtek_smi_shutdown,
 };
 

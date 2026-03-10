@@ -29,8 +29,6 @@
 	aliases {
 		serial2 = &uart_AO_B;
 		ethernet0 = &ethmac;
-		rtc0 = &rtc;
-		rtc1 = &vrtc;
 	};
 
 	gpio-keys-polled {
@@ -213,10 +211,16 @@
 	status = "okay";
 	pinctrl-0 = <&pwm_ao_a_3_pins>, <&pwm_ao_b_pins>;
 	pinctrl-names = "default";
+	clocks = <&xtal> , <&xtal>;
+	clock-names = "clkin0", "clkin1" ;
 };
 
 &pwm_ef {
 	pinctrl-0 = <&pwm_e_pins>, <&pwm_f_clk_pins>;
+};
+
+&sd_emmc_a {
+	max-frequency = <100000000>;
 };
 
 /* This is brought out on the Linux_RX (18) and Linux_TX (19) pins: */

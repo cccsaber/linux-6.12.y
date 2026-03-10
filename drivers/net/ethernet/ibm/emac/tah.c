@@ -158,7 +158,7 @@ static struct platform_driver tah_driver = {
 		.of_match_table = tah_match,
 	},
 	.probe = tah_probe,
-	.remove = tah_remove,
+	.remove_new = tah_remove,
 };
 
 int __init tah_init(void)

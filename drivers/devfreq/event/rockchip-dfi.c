@@ -34,21 +34,15 @@
 
 /* DDRMON_CTRL */
 #define DDRMON_CTRL	0x04
-#define DDRMON_CTRL_LPDDR5		BIT(6)
 #define DDRMON_CTRL_DDR4		BIT(5)
 #define DDRMON_CTRL_LPDDR4		BIT(4)
 #define DDRMON_CTRL_HARDWARE_EN		BIT(3)
 #define DDRMON_CTRL_LPDDR23		BIT(2)
 #define DDRMON_CTRL_SOFTWARE_EN		BIT(1)
 #define DDRMON_CTRL_TIMER_CNT_EN	BIT(0)
-#define DDRMON_CTRL_DDR_TYPE_MASK	(DDRMON_CTRL_LPDDR5 | \
-					 DDRMON_CTRL_DDR4 | \
+#define DDRMON_CTRL_DDR_TYPE_MASK	(DDRMON_CTRL_DDR4 | \
 					 DDRMON_CTRL_LPDDR4 | \
 					 DDRMON_CTRL_LPDDR23)
-#define DDRMON_CTRL_LP5_BANK_MODE_MASK	GENMASK(8, 7)
-
-#define READ_DRAMTYPE_INFO(n)		(((n) >> 13) & 0x7)
-#define RK3328_GRF_OS_REG2		0x5d0
 
 #define DDRMON_CH0_WR_NUM		0x20
 #define DDRMON_CH0_RD_NUM		0x24
@@ -122,60 +116,13 @@ struct rockchip_dfi {
 	int buswidth[DMC_MAX_CHANNELS];
 	int ddrmon_stride;
 	bool ddrmon_ctrl_single;
-	u32 lp5_bank_mode;
-	bool lp5_ckr;	/* true if in 4:1 command-to-data clock ratio mode */
 	unsigned int count_multiplier;	/* number of data clocks per count */
 };
-
-static int rockchip_dfi_ddrtype_to_ctrl(struct rockchip_dfi *dfi, u32 *ctrl,
-					u32 *mask)
-{
-	u32 ddrmon_ver;
-
-	*mask = DDRMON_CTRL_DDR_TYPE_MASK;
-
-	switch (dfi->ddr_type) {
-	case ROCKCHIP_DDRTYPE_LPDDR2:
-	case ROCKCHIP_DDRTYPE_LPDDR3:
-		*ctrl = DDRMON_CTRL_LPDDR23;
-		break;
-	case ROCKCHIP_DDRTYPE_LPDDR4:
-	case ROCKCHIP_DDRTYPE_LPDDR4X:
-		*ctrl = DDRMON_CTRL_LPDDR4;
-		break;
-	case ROCKCHIP_DDRTYPE_LPDDR5:
-		ddrmon_ver = readl_relaxed(dfi->regs);
-		if (ddrmon_ver < 0x40) {
-			*ctrl = DDRMON_CTRL_LPDDR5 | dfi->lp5_bank_mode;
-			*mask |= DDRMON_CTRL_LP5_BANK_MODE_MASK;
-			break;
-		}
-
-		/*
-		 * As it is unknown whether the unpleasant special case
-		 * behaviour used by the vendor kernel is needed for any
-		 * shipping hardware, ask users to report if they have
-		 * some of that hardware.
-		 */
-		dev_err(&dfi->edev->dev,
-			"unsupported DDRMON version 0x%04X, please let linux-rockchip know!\n",
-			ddrmon_ver);
-		return -EOPNOTSUPP;
-	default:
-		dev_err(&dfi->edev->dev, "unsupported memory type 0x%X\n",
-			dfi->ddr_type);
-		return -EOPNOTSUPP;
-	}
-
-	return 0;
-}
 
 static int rockchip_dfi_enable(struct rockchip_dfi *dfi)
 {
 	void __iomem *dfi_regs = dfi->regs;
 	int i, ret = 0;
-	u32 ctrl;
-	u32 ctrl_mask;
 
 	mutex_lock(&dfi->mutex);
 
@@ -189,11 +136,8 @@ static int rockchip_dfi_enable(struct rockchip_dfi *dfi)
 		goto out;
 	}
 
-	ret = rockchip_dfi_ddrtype_to_ctrl(dfi, &ctrl, &ctrl_mask);
-	if (ret)
-		goto out;
-
 	for (i = 0; i < dfi->max_channels; i++) {
+		u32 ctrl = 0;
 
 		if (!(dfi->channel_mask & BIT(i)))
 			continue;
@@ -203,7 +147,21 @@ static int rockchip_dfi_enable(struct rockchip_dfi *dfi)
 			       DDRMON_CTRL_SOFTWARE_EN | DDRMON_CTRL_HARDWARE_EN),
 			       dfi_regs + i * dfi->ddrmon_stride + DDRMON_CTRL);
 
-		writel_relaxed(HIWORD_UPDATE(ctrl, ctrl_mask),
+		/* set ddr type to dfi */
+		switch (dfi->ddr_type) {
+		case ROCKCHIP_DDRTYPE_LPDDR2:
+		case ROCKCHIP_DDRTYPE_LPDDR3:
+			ctrl = DDRMON_CTRL_LPDDR23;
+			break;
+		case ROCKCHIP_DDRTYPE_LPDDR4:
+		case ROCKCHIP_DDRTYPE_LPDDR4X:
+			ctrl = DDRMON_CTRL_LPDDR4;
+			break;
+		default:
+			break;
+		}
+
+		writel_relaxed(HIWORD_UPDATE(ctrl, DDRMON_CTRL_DDR_TYPE_MASK),
 			       dfi_regs + i * dfi->ddrmon_stride + DDRMON_CTRL);
 
 		/* enable count, use software mode */
@@ -685,7 +643,8 @@ static int rockchip_ddr_perf_init(struct rockchip_dfi *dfi)
 	if (ret)
 		return ret;
 
-	hrtimer_setup(&dfi->timer, rockchip_dfi_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer_init(&dfi->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	dfi->timer.function = rockchip_dfi_timer;
 
 	switch (dfi->ddr_type) {
 	case ROCKCHIP_DDRTYPE_LPDDR2:
@@ -694,7 +653,6 @@ static int rockchip_ddr_perf_init(struct rockchip_dfi *dfi)
 		break;
 	case ROCKCHIP_DDRTYPE_LPDDR4:
 	case ROCKCHIP_DDRTYPE_LPDDR4X:
-	case ROCKCHIP_DDRTYPE_LPDDR5:
 		dfi->burst_len = 16;
 		break;
 	}
@@ -714,22 +672,6 @@ static int rockchip_ddr_perf_init(struct rockchip_dfi *dfi)
 	return 0;
 }
 #endif
-
-static int rk3328_dfi_init(struct rockchip_dfi *dfi)
-{
-	struct regmap *regmap_pmu = dfi->regmap_pmu;
-	u32 val;
-
-	regmap_read(regmap_pmu, RK3328_GRF_OS_REG2, &val);
-	dfi->ddr_type = READ_DRAMTYPE_INFO(val);
-	dfi->channel_mask = BIT(0);
-	dfi->max_channels = 1;
-
-	dfi->ddrmon_stride = 0x0;
-	dfi->ddrmon_ctrl_single = true;
-
-	return 0;
-}
 
 static int rk3399_dfi_init(struct rockchip_dfi *dfi)
 {
@@ -789,7 +731,7 @@ static int rk3568_dfi_init(struct rockchip_dfi *dfi)
 static int rk3588_dfi_init(struct rockchip_dfi *dfi)
 {
 	struct regmap *regmap_pmu = dfi->regmap_pmu;
-	u32 reg2, reg3, reg4, reg6;
+	u32 reg2, reg3, reg4;
 
 	regmap_read(regmap_pmu, RK3588_PMUGRF_OS_REG2, &reg2);
 	regmap_read(regmap_pmu, RK3588_PMUGRF_OS_REG3, &reg3);
@@ -816,19 +758,10 @@ static int rk3588_dfi_init(struct rockchip_dfi *dfi)
 	dfi->ddrmon_stride = 0x4000;
 	dfi->count_multiplier = 2;
 
-	if (dfi->ddr_type == ROCKCHIP_DDRTYPE_LPDDR5) {
-		regmap_read(regmap_pmu, RK3588_PMUGRF_OS_REG6, &reg6);
-		dfi->lp5_bank_mode = FIELD_GET(RK3588_PMUGRF_OS_REG6_LP5_BANK_MODE, reg6) << 7;
-		dfi->lp5_ckr = FIELD_GET(RK3588_PMUGRF_OS_REG6_LP5_CKR, reg6);
-		if (dfi->lp5_ckr)
-			dfi->count_multiplier *= 2;
-	}
-
 	return 0;
 };
 
 static const struct of_device_id rockchip_dfi_id_match[] = {
-	{ .compatible = "rockchip,rk3328-dfi", .data = rk3328_dfi_init },
 	{ .compatible = "rockchip,rk3399-dfi", .data = rk3399_dfi_init },
 	{ .compatible = "rockchip,rk3568-dfi", .data = rk3568_dfi_init },
 	{ .compatible = "rockchip,rk3588-dfi", .data = rk3588_dfi_init },

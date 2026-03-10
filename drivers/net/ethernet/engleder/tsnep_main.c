@@ -2697,7 +2697,7 @@ static struct platform_driver tsnep_driver = {
 		.of_match_table = tsnep_of_match,
 	},
 	.probe = tsnep_probe,
-	.remove = tsnep_remove,
+	.remove_new = tsnep_remove,
 };
 module_platform_driver(tsnep_driver);
 

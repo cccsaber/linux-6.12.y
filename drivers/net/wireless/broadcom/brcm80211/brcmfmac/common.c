@@ -59,11 +59,7 @@ static int brcmf_fcmode;
 module_param_named(fcmode, brcmf_fcmode, int, 0);
 MODULE_PARM_DESC(fcmode, "Mode of firmware signalled flow control");
 
-#if defined(CONFIG_ARCH_BCM2835)
-static int brcmf_roamoff = 1;
-#else
 static int brcmf_roamoff;
-#endif
 module_param_named(roamoff, brcmf_roamoff, int, 0400);
 MODULE_PARM_DESC(roamoff, "Do not use internal roaming engine");
 
@@ -565,8 +561,7 @@ struct brcmf_mp_device *brcmf_get_module_param(struct device *dev,
 	if (!found) {
 		/* No platform data for this device, try OF and DMI data */
 		brcmf_dmi_probe(settings, chip, chiprev);
-		if (brcmf_of_probe(dev, bus_type, settings) == -EPROBE_DEFER)
-			return ERR_PTR(-EPROBE_DEFER);
+		brcmf_of_probe(dev, bus_type, settings);
 		brcmf_acpi_probe(dev, bus_type, settings);
 	}
 	return settings;

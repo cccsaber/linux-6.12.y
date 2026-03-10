@@ -43,7 +43,6 @@
 #include <net/pkt_cls.h>
 #include <net/xdp_sock_drv.h>
 #include "stmmac_ptp.h"
-#include "stmmac_fpe.h"
 #include "stmmac.h"
 #include "stmmac_xdp.h"
 #include <linux/reset.h>
@@ -77,6 +76,7 @@ module_param(phyaddr, int, 0444);
 MODULE_PARM_DESC(phyaddr, "Physical device address");
 
 #define STMMAC_TX_THRESH(x)	((x)->dma_conf.dma_tx_size / 4)
+#define STMMAC_RX_THRESH(x)	((x)->dma_conf.dma_rx_size / 4)
 
 /* Limit to make sure XDP TX and slow path can coexist */
 #define STMMAC_XSK_TX_BUDGET_MAX	256
@@ -106,6 +106,8 @@ MODULE_PARM_DESC(tc, "DMA threshold control value");
 static int buf_sz = DEFAULT_BUFSIZE;
 module_param(buf_sz, int, 0644);
 MODULE_PARM_DESC(buf_sz, "DMA buffer size");
+
+#define	STMMAC_RX_COPYBREAK	256
 
 static const u32 default_msg_level = (NETIF_MSG_DRV | NETIF_MSG_PROBE |
 				      NETIF_MSG_LINK | NETIF_MSG_IFUP |
@@ -177,38 +179,6 @@ int stmmac_bus_clks_config(struct stmmac_priv *priv, bool enabled)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(stmmac_bus_clks_config);
-
-/**
- * stmmac_set_clk_tx_rate() - set the clock rate for the MAC transmit clock
- * @bsp_priv: BSP private data structure (unused)
- * @clk_tx_i: the transmit clock
- * @interface: the selected interface mode
- * @speed: the speed that the MAC will be operating at
- *
- * Set the transmit clock rate for the MAC, normally 2.5MHz for 10Mbps,
- * 25MHz for 100Mbps and 125MHz for 1Gbps. This is suitable for at least
- * MII, GMII, RGMII and RMII interface modes. Platforms can hook this into
- * the plat_data->set_clk_tx_rate method directly, call it via their own
- * implementation, or implement their own method should they have more
- * complex requirements. It is intended to only be used in this method.
- *
- * plat_data->clk_tx_i must be filled in.
- */
-int stmmac_set_clk_tx_rate(void *bsp_priv, struct clk *clk_tx_i,
-			   phy_interface_t interface, int speed)
-{
-	long rate = rgmii_clock(speed);
-
-	/* Silently ignore unsupported speeds as rgmii_clock() only
-	 * supports 10, 100 and 1000Mbps. We do not want to spit
-	 * errors for 2500 and higher speeds here.
-	 */
-	if (rate < 0)
-		return 0;
-
-	return clk_set_rate(clk_tx_i, rate);
-}
-EXPORT_SYMBOL_GPL(stmmac_set_clk_tx_rate);
 
 /**
  * stmmac_verify_args - verify the driver parameters.
@@ -331,7 +301,7 @@ static void stmmac_global_err(struct stmmac_priv *priv)
  */
 static void stmmac_clk_csr_set(struct stmmac_priv *priv)
 {
-	unsigned long clk_rate;
+	u32 clk_rate;
 
 	clk_rate = clk_get_rate(priv->plat->stmmac_clk);
 
@@ -355,10 +325,6 @@ static void stmmac_clk_csr_set(struct stmmac_priv *priv)
 			priv->clk_csr = STMMAC_CSR_150_250M;
 		else if ((clk_rate >= CSR_F_250M) && (clk_rate <= CSR_F_300M))
 			priv->clk_csr = STMMAC_CSR_250_300M;
-		else if ((clk_rate >= CSR_F_300M) && (clk_rate < CSR_F_500M))
-			priv->clk_csr = STMMAC_CSR_300_500M;
-		else if ((clk_rate >= CSR_F_500M) && (clk_rate < CSR_F_800M))
-			priv->clk_csr = STMMAC_CSR_500_800M;
 	}
 
 	if (priv->plat->flags & STMMAC_FLAG_HAS_SUN8I) {
@@ -1006,6 +972,35 @@ static void stmmac_mac_config(struct phylink_config *config, unsigned int mode,
 	/* Nothing to do, xpcs_config() handles everything */
 }
 
+static void stmmac_fpe_link_state_handle(struct stmmac_priv *priv, bool is_up)
+{
+	struct stmmac_fpe_cfg *fpe_cfg = &priv->fpe_cfg;
+	unsigned long flags;
+
+	timer_shutdown_sync(&fpe_cfg->verify_timer);
+
+	spin_lock_irqsave(&fpe_cfg->lock, flags);
+
+	if (is_up && fpe_cfg->pmac_enabled) {
+		/* VERIFY process requires pmac enabled when NIC comes up */
+		stmmac_fpe_configure(priv, priv->ioaddr, fpe_cfg,
+				     priv->plat->tx_queues_to_use,
+				     priv->plat->rx_queues_to_use,
+				     false, true);
+
+		/* New link => maybe new partner => new verification process */
+		stmmac_fpe_apply(priv);
+	} else {
+		/* No link => turn off EFPE */
+		stmmac_fpe_configure(priv, priv->ioaddr, fpe_cfg,
+				     priv->plat->tx_queues_to_use,
+				     priv->plat->rx_queues_to_use,
+				     false, false);
+	}
+
+	spin_unlock_irqrestore(&fpe_cfg->lock, flags);
+}
+
 static void stmmac_mac_link_down(struct phylink_config *config,
 				 unsigned int mode, phy_interface_t interface)
 {
@@ -1017,7 +1012,7 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 	priv->eee_enabled = stmmac_eee_init(priv);
 	stmmac_set_eee_pls(priv, priv->hw, false);
 
-	if (stmmac_fpe_supported(priv))
+	if (priv->dma_cap.fpesel)
 		stmmac_fpe_link_state_handle(priv, false);
 }
 
@@ -1029,7 +1024,6 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 {
 	struct stmmac_priv *priv = netdev_priv(to_net_dev(config->dev));
 	u32 old_ctrl, ctrl;
-	int ret;
 
 	if ((priv->plat->flags & STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP) &&
 	    priv->plat->serdes_powerup)
@@ -1122,16 +1116,6 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 	if (ctrl != old_ctrl)
 		writel(ctrl, priv->ioaddr + MAC_CTRL_REG);
 
-	if (priv->plat->set_clk_tx_rate) {
-		ret = priv->plat->set_clk_tx_rate(priv->plat->bsp_priv,
-						priv->plat->clk_tx_i,
-						interface, speed);
-		if (ret < 0)
-			netdev_err(priv->dev,
-				   "failed to configure %s transmit clock for %dMbps: %pe\n",
-				   phy_modes(interface), speed, ERR_PTR(ret));
-	}
-
 	stmmac_mac_set(priv, priv->ioaddr, true);
 	if (phy && priv->dma_cap.eee) {
 		priv->eee_active =
@@ -1142,7 +1126,7 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 		stmmac_set_eee_pls(priv, priv->hw, true);
 	}
 
-	if (stmmac_fpe_supported(priv))
+	if (priv->dma_cap.fpesel)
 		stmmac_fpe_link_state_handle(priv, true);
 
 	if (priv->plat->flags & STMMAC_FLAG_HWTSTAMP_CORRECT_LATENCY)
@@ -1355,14 +1339,6 @@ static void stmmac_display_rings(struct stmmac_priv *priv,
 
 	/* Display TX ring */
 	stmmac_display_tx_rings(priv, dma_conf);
-}
-
-static unsigned int stmmac_rx_offset(struct stmmac_priv *priv)
-{
-	if (stmmac_xdp_is_enabled(priv))
-		return XDP_PACKET_HEADROOM;
-
-	return NET_SKB_PAD;
 }
 
 static int stmmac_set_bfsize(int mtu, int bufsize)
@@ -2061,31 +2037,22 @@ static int __alloc_dma_rx_desc_resources(struct stmmac_priv *priv,
 	struct stmmac_channel *ch = &priv->channel[queue];
 	bool xdp_prog = stmmac_xdp_is_enabled(priv);
 	struct page_pool_params pp_params = { 0 };
-	unsigned int dma_buf_sz_pad, num_pages;
+	unsigned int num_pages;
 	unsigned int napi_id;
 	int ret;
 
-	dma_buf_sz_pad = stmmac_rx_offset(priv) + dma_conf->dma_buf_sz +
-			 SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
-	num_pages = DIV_ROUND_UP(dma_buf_sz_pad, PAGE_SIZE);
-
 	rx_q->queue_index = queue;
 	rx_q->priv_data = priv;
-	rx_q->napi_skb_frag_size = num_pages * PAGE_SIZE;
 
 	pp_params.flags = PP_FLAG_DMA_MAP | PP_FLAG_DMA_SYNC_DEV;
 	pp_params.pool_size = dma_conf->dma_rx_size;
-	pp_params.order = order_base_2(num_pages);
+	num_pages = DIV_ROUND_UP(dma_conf->dma_buf_sz, PAGE_SIZE);
+	pp_params.order = ilog2(num_pages);
 	pp_params.nid = dev_to_node(priv->device);
 	pp_params.dev = priv->device;
 	pp_params.dma_dir = xdp_prog ? DMA_BIDIRECTIONAL : DMA_FROM_DEVICE;
 	pp_params.offset = stmmac_rx_offset(priv);
-	pp_params.max_len = dma_conf->dma_buf_sz;
-
-	if (priv->sph) {
-		pp_params.offset = 0;
-		pp_params.max_len += stmmac_rx_offset(priv);
-	}
+	pp_params.max_len = STMMAC_MAX_RX_BUF_SIZE(num_pages);
 
 	rx_q->page_pool = page_pool_create(&pp_params);
 	if (IS_ERR(rx_q->page_pool)) {
@@ -3191,7 +3158,8 @@ static void stmmac_init_coalesce(struct stmmac_priv *priv)
 		priv->tx_coal_frames[chan] = STMMAC_TX_FRAMES;
 		priv->tx_coal_timer[chan] = STMMAC_COAL_TX_TIMER;
 
-		hrtimer_setup(&tx_q->txtimer, stmmac_tx_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		hrtimer_init(&tx_q->txtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		tx_q->txtimer.function = stmmac_tx_timer;
 	}
 
 	for (chan = 0; chan < rx_channel_count; chan++)
@@ -3987,6 +3955,8 @@ static int __stmmac_open(struct net_device *dev,
 		}
 	}
 
+	priv->rx_copybreak = STMMAC_RX_COPYBREAK;
+
 	buf_sz = dma_conf->dma_buf_sz;
 	for (int i = 0; i < MTL_MAX_TX_QUEUES; i++)
 		if (priv->dma_conf.tx_queue[i].tbs & STMMAC_TBS_EN)
@@ -4106,7 +4076,7 @@ static int stmmac_release(struct net_device *dev)
 
 	stmmac_release_ptp(priv);
 
-	if (stmmac_fpe_supported(priv))
+	if (priv->dma_cap.fpesel)
 		timer_shutdown_sync(&priv->fpe_cfg.verify_timer);
 
 	pm_runtime_put(priv->device);
@@ -4179,7 +4149,11 @@ static void stmmac_tso_allocator(struct stmmac_priv *priv, dma_addr_t des,
 			desc = &tx_q->dma_tx[tx_q->cur_tx];
 
 		curr_addr = des + (total_len - tmp_len);
-		stmmac_set_desc_addr(priv, desc, curr_addr);
+		if (priv->dma_cap.addr64 <= 32)
+			desc->des0 = cpu_to_le32(curr_addr);
+		else
+			stmmac_set_desc_addr(priv, desc, curr_addr);
+
 		buff_size = tmp_len >= TSO_MAX_BUFF_SIZE ?
 			    TSO_MAX_BUFF_SIZE : tmp_len;
 
@@ -4225,27 +4199,17 @@ static void stmmac_flush_tx_descriptors(struct stmmac_priv *priv, int queue)
  *  First Descriptor
  *   --------
  *   | DES0 |---> buffer1 = L2/L3/L4 header
- *   | DES1 |---> can be used as buffer2 for TCP Payload if the DMA AXI address
- *   |      |     width is 32-bit, but we never use it.
- *   |      |     Also can be used as the most-significant 8-bits or 16-bits of
- *   |      |     buffer1 address pointer if the DMA AXI address width is 40-bit
- *   |      |     or 48-bit, and we always use it.
- *   | DES2 |---> buffer1 len
+ *   | DES1 |---> TCP Payload (can continue on next descr...)
+ *   | DES2 |---> buffer 1 and 2 len
  *   | DES3 |---> must set TSE, TCP hdr len-> [22:19]. TCP payload len [17:0]
- *   --------
- *   --------
- *   | DES0 |---> buffer1 = TCP Payload (can continue on next descr...)
- *   | DES1 |---> same as the First Descriptor
- *   | DES2 |---> buffer1 len
- *   | DES3 |
  *   --------
  *	|
  *     ...
  *	|
  *   --------
- *   | DES0 |---> buffer1 = Split TCP Payload
- *   | DES1 |---> same as the First Descriptor
- *   | DES2 |---> buffer1 len
+ *   | DES0 | --| Split TCP Payload on Buffers 1 and 2
+ *   | DES1 | --|
+ *   | DES2 | --> buffer 1 and 2 len
  *   | DES3 |
  *   --------
  *
@@ -4255,14 +4219,15 @@ static netdev_tx_t stmmac_tso_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct dma_desc *desc, *first, *mss_desc = NULL;
 	struct stmmac_priv *priv = netdev_priv(dev);
+	int tmp_pay_len = 0, first_tx, nfrags;
 	unsigned int first_entry, tx_packets;
 	struct stmmac_txq_stats *txq_stats;
 	struct stmmac_tx_queue *tx_q;
-	bool set_ic, is_last_segment;
 	u32 pay_len, mss, queue;
-	int i, first_tx, nfrags;
+	dma_addr_t tso_des, des;
 	u8 proto_hdr_len, hdr;
-	dma_addr_t des;
+	bool set_ic;
+	int i;
 
 	/* Always insert VLAN tag to SKB payload for TSO frames.
 	 *
@@ -4347,9 +4312,24 @@ static netdev_tx_t stmmac_tso_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (dma_mapping_error(priv->device, des))
 		goto dma_map_err;
 
-	stmmac_set_desc_addr(priv, first, des);
-	stmmac_tso_allocator(priv, des + proto_hdr_len, pay_len,
-			     (nfrags == 0), queue);
+	if (priv->dma_cap.addr64 <= 32) {
+		first->des0 = cpu_to_le32(des);
+
+		/* Fill start of payload in buff2 of first descriptor */
+		if (pay_len)
+			first->des1 = cpu_to_le32(des + proto_hdr_len);
+
+		/* If needed take extra descriptors to fill the remaining payload */
+		tmp_pay_len = pay_len - TSO_MAX_BUFF_SIZE;
+		tso_des = des;
+	} else {
+		stmmac_set_desc_addr(priv, first, des);
+		tmp_pay_len = pay_len;
+		tso_des = des + proto_hdr_len;
+		pay_len = 0;
+	}
+
+	stmmac_tso_allocator(priv, tso_des, tmp_pay_len, (nfrags == 0), queue);
 
 	/* In case two or more DMA transmit descriptors are allocated for this
 	 * non-paged SKB data, the DMA buffer address should be saved to
@@ -4450,16 +4430,12 @@ static netdev_tx_t stmmac_tso_xmit(struct sk_buff *skb, struct net_device *dev)
 		stmmac_enable_tx_timestamp(priv, first);
 	}
 
-	/* If we only have one entry used, then the first entry is the last
-	 * segment.
-	 */
-	is_last_segment = ((tx_q->cur_tx - first_entry) &
-			   (priv->dma_conf.dma_tx_size - 1)) == 1;
-
 	/* Complete the first descriptor before granting the DMA */
-	stmmac_prepare_tso_tx_desc(priv, first, 1, proto_hdr_len, 0, 1,
-				   is_last_segment, hdr / 4,
-				   skb->len - proto_hdr_len);
+	stmmac_prepare_tso_tx_desc(priv, first, 1,
+			proto_hdr_len,
+			pay_len,
+			1, tx_q->tx_skbuff_dma[first_entry].last_segment,
+			hdr / 4, (skb->len - proto_hdr_len));
 
 	/* If context desc is used to change MSS */
 	if (mss_desc) {
@@ -5539,7 +5515,7 @@ read_again:
 		if (priv->extend_desc)
 			stmmac_rx_extended_status(priv, &priv->xstats, rx_q->dma_erx + entry);
 		if (unlikely(status == discard_frame)) {
-			page_pool_put_page(rx_q->page_pool, buf->page, 0, true);
+			page_pool_recycle_direct(rx_q->page_pool, buf->page);
 			buf->page = NULL;
 			error = 1;
 			if (!priv->hwts_rx_en)
@@ -5556,6 +5532,10 @@ read_again:
 		}
 
 		/* Buffer is good. Go on. */
+
+		prefetch(page_address(buf->page) + buf->page_offset);
+		if (buf->sec_page)
+			prefetch(page_address(buf->sec_page));
 
 		buf1_len = stmmac_rx_buf1_len(priv, p, status, len);
 		len += buf1_len;
@@ -5578,8 +5558,6 @@ read_again:
 
 			dma_sync_single_for_cpu(priv->device, buf->addr,
 						buf1_len, dma_dir);
-			net_prefetch(page_address(buf->page) +
-				     buf->page_offset);
 
 			xdp_init_buff(&ctx.xdp, buf_sz, &rx_q->xdp_rxq);
 			xdp_prepare_buff(&ctx.xdp, page_address(buf->page),
@@ -5633,26 +5611,22 @@ read_again:
 		}
 
 		if (!skb) {
-			unsigned int head_pad_len;
-
 			/* XDP program may expand or reduce tail */
 			buf1_len = ctx.xdp.data_end - ctx.xdp.data;
 
-			skb = napi_build_skb(page_address(buf->page),
-					     rx_q->napi_skb_frag_size);
+			skb = napi_alloc_skb(&ch->rx_napi, buf1_len);
 			if (!skb) {
-				page_pool_recycle_direct(rx_q->page_pool,
-							 buf->page);
 				rx_dropped++;
 				count++;
 				goto drain_data;
 			}
 
 			/* XDP program may adjust header */
-			head_pad_len = ctx.xdp.data - ctx.xdp.data_hard_start;
-			skb_reserve(skb, head_pad_len);
+			skb_copy_to_linear_data(skb, ctx.xdp.data, buf1_len);
 			skb_put(skb, buf1_len);
-			skb_mark_for_recycle(skb);
+
+			/* Data payload copied into SKB, page ready for recycle */
+			page_pool_recycle_direct(rx_q->page_pool, buf->page);
 			buf->page = NULL;
 		} else if (buf1_len) {
 			dma_sync_single_for_cpu(priv->device, buf->addr,
@@ -5660,6 +5634,9 @@ read_again:
 			skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags,
 					buf->page, buf->page_offset, buf1_len,
 					priv->dma_conf.dma_buf_sz);
+
+			/* Data payload appended into SKB */
+			skb_mark_for_recycle(skb);
 			buf->page = NULL;
 		}
 
@@ -5669,6 +5646,9 @@ read_again:
 			skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags,
 					buf->sec_page, 0, buf2_len,
 					priv->dma_conf.dma_buf_sz);
+
+			/* Data payload appended into SKB */
+			skb_mark_for_recycle(skb);
 			buf->sec_page = NULL;
 		}
 
@@ -6005,6 +5985,35 @@ static int stmmac_set_features(struct net_device *netdev,
 	return 0;
 }
 
+static void stmmac_fpe_event_status(struct stmmac_priv *priv, int status)
+{
+	struct stmmac_fpe_cfg *fpe_cfg = &priv->fpe_cfg;
+
+	/* This is interrupt context, just spin_lock() */
+	spin_lock(&fpe_cfg->lock);
+
+	if (!fpe_cfg->pmac_enabled || status == FPE_EVENT_UNKNOWN)
+		goto unlock_out;
+
+	/* LP has sent verify mPacket */
+	if ((status & FPE_EVENT_RVER) == FPE_EVENT_RVER)
+		stmmac_fpe_send_mpacket(priv, priv->ioaddr, fpe_cfg,
+					MPACKET_RESPONSE);
+
+	/* Local has sent verify mPacket */
+	if ((status & FPE_EVENT_TVER) == FPE_EVENT_TVER &&
+	    fpe_cfg->status != ETHTOOL_MM_VERIFY_STATUS_SUCCEEDED)
+		fpe_cfg->status = ETHTOOL_MM_VERIFY_STATUS_VERIFYING;
+
+	/* LP has sent response mPacket */
+	if ((status & FPE_EVENT_RRSP) == FPE_EVENT_RRSP &&
+	    fpe_cfg->status == ETHTOOL_MM_VERIFY_STATUS_VERIFYING)
+		fpe_cfg->status = ETHTOOL_MM_VERIFY_STATUS_SUCCEEDED;
+
+unlock_out:
+	spin_unlock(&fpe_cfg->lock);
+}
+
 static void stmmac_common_interrupt(struct stmmac_priv *priv)
 {
 	u32 rx_cnt = priv->plat->rx_queues_to_use;
@@ -6023,8 +6032,12 @@ static void stmmac_common_interrupt(struct stmmac_priv *priv)
 		stmmac_est_irq_status(priv, priv, priv->dev,
 				      &priv->xstats, tx_cnt);
 
-	if (stmmac_fpe_supported(priv))
-		stmmac_fpe_irq_status(priv);
+	if (priv->dma_cap.fpesel) {
+		int status = stmmac_fpe_irq_status(priv, priv->ioaddr,
+						   priv->dev);
+
+		stmmac_fpe_event_status(priv, status);
+	}
 
 	/* To handle GMAC own interrupts */
 	if ((priv->plat->has_gmac) || xmac) {
@@ -6986,7 +6999,8 @@ int stmmac_xdp_open(struct net_device *dev)
 		stmmac_set_tx_tail_ptr(priv, priv->ioaddr,
 				       tx_q->tx_tail_addr, chan);
 
-		hrtimer_setup(&tx_q->txtimer, stmmac_tx_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		hrtimer_init(&tx_q->txtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		tx_q->txtimer.function = stmmac_tx_timer;
 	}
 
 	/* Enable the MAC Rx/Tx */
@@ -7385,6 +7399,90 @@ int stmmac_reinit_ringparam(struct net_device *dev, u32 rx_size, u32 tx_size)
 	return ret;
 }
 
+/**
+ * stmmac_fpe_verify_timer - Timer for MAC Merge verification
+ * @t:  timer_list struct containing private info
+ *
+ * Verify the MAC Merge capability in the local TX direction, by
+ * transmitting Verify mPackets up to 3 times. Wait until link
+ * partner responds with a Response mPacket, otherwise fail.
+ */
+static void stmmac_fpe_verify_timer(struct timer_list *t)
+{
+	struct stmmac_fpe_cfg *fpe_cfg = from_timer(fpe_cfg, t, verify_timer);
+	struct stmmac_priv *priv = container_of(fpe_cfg, struct stmmac_priv,
+						fpe_cfg);
+	unsigned long flags;
+	bool rearm = false;
+
+	spin_lock_irqsave(&fpe_cfg->lock, flags);
+
+	switch (fpe_cfg->status) {
+	case ETHTOOL_MM_VERIFY_STATUS_INITIAL:
+	case ETHTOOL_MM_VERIFY_STATUS_VERIFYING:
+		if (fpe_cfg->verify_retries != 0) {
+			stmmac_fpe_send_mpacket(priv, priv->ioaddr,
+						fpe_cfg, MPACKET_VERIFY);
+			rearm = true;
+		} else {
+			fpe_cfg->status = ETHTOOL_MM_VERIFY_STATUS_FAILED;
+		}
+
+		fpe_cfg->verify_retries--;
+		break;
+
+	case ETHTOOL_MM_VERIFY_STATUS_SUCCEEDED:
+		stmmac_fpe_configure(priv, priv->ioaddr, fpe_cfg,
+				     priv->plat->tx_queues_to_use,
+				     priv->plat->rx_queues_to_use,
+				     true, true);
+		break;
+
+	default:
+		break;
+	}
+
+	if (rearm) {
+		mod_timer(&fpe_cfg->verify_timer,
+			  jiffies + msecs_to_jiffies(fpe_cfg->verify_time));
+	}
+
+	spin_unlock_irqrestore(&fpe_cfg->lock, flags);
+}
+
+static void stmmac_fpe_verify_timer_arm(struct stmmac_fpe_cfg *fpe_cfg)
+{
+	if (fpe_cfg->pmac_enabled && fpe_cfg->tx_enabled &&
+	    fpe_cfg->verify_enabled &&
+	    fpe_cfg->status != ETHTOOL_MM_VERIFY_STATUS_FAILED &&
+	    fpe_cfg->status != ETHTOOL_MM_VERIFY_STATUS_SUCCEEDED) {
+		timer_setup(&fpe_cfg->verify_timer, stmmac_fpe_verify_timer, 0);
+		mod_timer(&fpe_cfg->verify_timer, jiffies);
+	}
+}
+
+void stmmac_fpe_apply(struct stmmac_priv *priv)
+{
+	struct stmmac_fpe_cfg *fpe_cfg = &priv->fpe_cfg;
+
+	/* If verification is disabled, configure FPE right away.
+	 * Otherwise let the timer code do it.
+	 */
+	if (!fpe_cfg->verify_enabled) {
+		stmmac_fpe_configure(priv, priv->ioaddr, fpe_cfg,
+				     priv->plat->tx_queues_to_use,
+				     priv->plat->rx_queues_to_use,
+				     fpe_cfg->tx_enabled,
+				     fpe_cfg->pmac_enabled);
+	} else {
+		fpe_cfg->status = ETHTOOL_MM_VERIFY_STATUS_INITIAL;
+		fpe_cfg->verify_retries = STMMAC_FPE_MM_MAX_VERIFY_RETRIES;
+
+		if (netif_running(priv->dev))
+			stmmac_fpe_verify_timer_arm(fpe_cfg);
+	}
+}
+
 static int stmmac_xdp_rx_timestamp(const struct xdp_md *_ctx, u64 *timestamp)
 {
 	const struct stmmac_xdp_buff *ctx = (void *)_ctx;
@@ -7432,7 +7530,6 @@ int stmmac_dvr_probe(struct device *device,
 {
 	struct net_device *ndev = NULL;
 	struct stmmac_priv *priv;
-	const char *devname = of_get_property(device->of_node, "label", NULL);
 	u32 rxq;
 	int i, ret = 0;
 
@@ -7440,9 +7537,6 @@ int stmmac_dvr_probe(struct device *device,
 				       MTL_MAX_TX_QUEUES, MTL_MAX_RX_QUEUES);
 	if (!ndev)
 		return -ENOMEM;
-
-	if (devname)
-		strscpy(ndev->name, devname, IFNAMSIZ);
 
 	SET_NETDEV_DEV(ndev, device);
 
@@ -7667,7 +7761,11 @@ int stmmac_dvr_probe(struct device *device,
 
 	mutex_init(&priv->lock);
 
-	stmmac_fpe_init(priv);
+	priv->fpe_cfg.verify_retries = STMMAC_FPE_MM_MAX_VERIFY_RETRIES;
+	priv->fpe_cfg.verify_time = STMMAC_FPE_MM_MAX_VERIFY_TIME_MS;
+	priv->fpe_cfg.status = ETHTOOL_MM_VERIFY_STATUS_DISABLED;
+	timer_setup(&priv->fpe_cfg.verify_timer, stmmac_fpe_verify_timer, 0);
+	spin_lock_init(&priv->fpe_cfg.lock);
 
 	/* If a specific clk_csr value is passed from the platform
 	 * this means that the CSR Clock Range selection cannot be
@@ -7842,7 +7940,7 @@ int stmmac_suspend(struct device *dev)
 	}
 	rtnl_unlock();
 
-	if (stmmac_fpe_supported(priv))
+	if (priv->dma_cap.fpesel)
 		timer_shutdown_sync(&priv->fpe_cfg.verify_timer);
 
 	priv->speed = SPEED_UNKNOWN;
