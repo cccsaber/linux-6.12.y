@@ -1,0 +1,187 @@
+name: fnnas_debs
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: fnnas-debs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  TZ: Etc/UTC
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.repository.owner.id == github.event.sender.id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Initialize environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euxo pipefail
+          sudo -E apt-get -y update
+          sudo -E apt-get -y install \
+            bc \
+            binutils-aarch64-linux-gnu \
+            bison \
+            build-essential \
+            ccache \
+            cpio \
+            debhelper \
+            device-tree-compiler \
+            dpkg-dev \
+            dwarves \
+            fakeroot \
+            flex \
+            gcc-aarch64-linux-gnu \
+            git \
+            kmod \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            lsb-release \
+            make \
+            python3 \
+            rsync \
+            xz-utils \
+            zstd
+
+      - name: Build fnnas deb packages
+        id: package
+        env:
+          ARCH: arm64
+          CROSS_COMPILE: aarch64-linux-gnu-
+          PLATFORM: rockchip
+          BUILD_ROOT: ${{ runner.temp }}/fnnas-debs
+          BUILD_DIR: ${{ runner.temp }}/fnnas-debs/linux
+          PKG_DIR: ${{ runner.temp }}/fnnas-debs/package
+          RELEASE_DIR: ${{ runner.temp }}/fnnas-debs/release
+          REPORT_DIR: ${{ runner.temp }}/fnnas-debs/report
+        run: |
+          set -euxo pipefail
+          shopt -s nullglob
+
+          rm -rf "$BUILD_ROOT"
+          mkdir -p "$BUILD_DIR" "$PKG_DIR/$PLATFORM" "$RELEASE_DIR" "$REPORT_DIR"
+
+          rsync -a \
+            --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            "$GITHUB_WORKSPACE/" "$BUILD_DIR/"
+
+          config_args=(
+            -e MODULES
+            -e BLK_DEV_INITRD
+            -e ARCH_ROCKCHIP
+            -e ROCKCHIP_IOMMU
+            -e DRM
+            -e DRM_ROCKCHIP
+            -e ROCKCHIP_VOP
+            -e ROCKCHIP_VOP2
+            -e ROCKCHIP_DW_HDMI
+            -e PHY_ROCKCHIP_INNO_HDMI
+          )
+
+          make -C "$BUILD_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            defconfig
+
+          "$BUILD_DIR"/scripts/config --file "$BUILD_DIR/.config" \
+            --set-str LOCALVERSION "-rockchip" \
+            -d LOCALVERSION_AUTO \
+            "${config_args[@]}"
+
+          make -C "$BUILD_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            olddefconfig
+
+          KERNEL_RELEASE="$(make -s -C "$BUILD_DIR" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" kernelrelease)"
+          KERNEL_BASE="${KERNEL_RELEASE%%-*}"
+
+          export KBUILD_DEBARCH=arm64
+          export KDEB_SOURCENAME=linux-6.12.y-rockchip
+          export KDEB_PKGVERSION="${KERNEL_RELEASE}-1"
+
+          make -C "$BUILD_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            -j"$(nproc)" \
+            bindeb-pkg \
+            2>&1 | tee "$REPORT_DIR/build.log"
+
+          copied=0
+          for deb in "$BUILD_ROOT"/*.deb; do
+            deb_name="$(basename "$deb")"
+            case "$deb_name" in
+              *-dbg_*.deb|*-dbgsym_*.deb)
+                continue
+                ;;
+            esac
+            cp "$deb" "$PKG_DIR/$PLATFORM/"
+            copied=1
+          done
+
+          if [ "$copied" -ne 1 ]; then
+            echo "No Debian packages were produced." >&2
+            exit 1
+          fi
+
+          deb_count="$(find "$PKG_DIR/$PLATFORM" -maxdepth 1 -type f -name '*.deb' | wc -l)"
+          if [ "$deb_count" -lt 2 ]; then
+            echo "Unexpected Debian package count: $deb_count" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "$KERNEL_RELEASE" > "$REPORT_DIR/kernelrelease.txt"
+          printf '%s\n' "$KERNEL_BASE" > "$REPORT_DIR/kernel-base.txt"
+          find "$PKG_DIR/$PLATFORM" -maxdepth 1 -type f -name '*.deb' -printf '%f\n' | sort > "$REPORT_DIR/deb-list.txt"
+
+          tar -C "$PKG_DIR" -czf "$RELEASE_DIR/${KERNEL_BASE}.tar.gz" "$PLATFORM"
+          sha256sum "$RELEASE_DIR/${KERNEL_BASE}.tar.gz" > "$REPORT_DIR/${KERNEL_BASE}.tar.gz.sha256"
+
+          {
+            echo "kernel_release=$KERNEL_RELEASE"
+            echo "kernel_base=$KERNEL_BASE"
+            echo "tarball_path=$RELEASE_DIR/${KERNEL_BASE}.tar.gz"
+            echo "report_dir=$REPORT_DIR"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload fnnas_debs release
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
+        uses: ncipollo/release-action@main
+        with:
+          tag: fnnas_debs
+          artifacts: ${{ steps.package.outputs.tarball_path }}
+          allowUpdates: true
+          removeArtifacts: false
+          replacesArtifacts: true
+          makeLatest: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            - Debian kernel packages for FnNAS `rekernel`.
+            - Asset name follows the `rekernel` parser: `${{ steps.package.outputs.kernel_base }}.tar.gz`.
+            - Extracted tarball layout: `rockchip/*.deb`.
+
+      - name: Upload workflow artifacts
+        if: ${{ always() && steps.package.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnnas_debs-${{ steps.package.outputs.kernel_base || github.run_id }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ steps.package.outputs.tarball_path }}
+            ${{ steps.package.outputs.report_dir }}
