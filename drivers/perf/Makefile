@@ -7,6 +7,7 @@ obj-$(CONFIG_ARM_NI) += arm-ni.o
 obj-$(CONFIG_ARM_PMU) += arm_pmu.o arm_pmu_platform.o
 obj-$(CONFIG_ARM_PMU_ACPI) += arm_pmu_acpi.o
 obj-$(CONFIG_ARM_PMUV3) += arm_pmuv3.o
+CFLAGS_arm_pmuv3.o += $(call cc-disable-warning, override-init)
 obj-$(CONFIG_ARM_V6_PMU) += arm_v6_pmu.o
 obj-$(CONFIG_ARM_V7_PMU) += arm_v7_pmu.o
 obj-$(CONFIG_ARM_XSCALE_PMU) += arm_xscale_pmu.o
