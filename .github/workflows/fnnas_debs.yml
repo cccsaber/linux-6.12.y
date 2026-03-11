@@ -116,6 +116,7 @@ jobs:
           export KBUILD_DEBARCH=arm64
           export KDEB_SOURCENAME=linux-6.12.y-rockchip
           export KDEB_PKGVERSION="${KERNEL_RELEASE}-1"
+          export DPKG_FLAGS=-d
 
           make -C "$BUILD_DIR" \
             ARCH="$ARCH" \
