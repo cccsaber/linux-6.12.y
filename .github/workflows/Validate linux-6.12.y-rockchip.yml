@@ -1,0 +1,209 @@
+name: Validate linux-6.12.y-rockchip build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: "Full kernel source used as the CI build base"
+        required: false
+        default: "https://github.com/cccsaber/linux-6.12.y.git"
+      upstream_ref:
+        description: "Git ref to clone from the build base repo"
+        required: false
+        default: "main"
+
+concurrency:
+  group: validate-linux-6.12.y-rockchip-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TZ: Etc/UTC
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euxo pipefail
+          sudo -E apt-get -y update
+          sudo -E apt-get -y install \
+            bc \
+            binutils-aarch64-linux-gnu \
+            bison \
+            build-essential \
+            ccache \
+            device-tree-compiler \
+            dwarves \
+            file \
+            flex \
+            gcc-aarch64-linux-gnu \
+            git \
+            kmod \
+            libelf-dev \
+            libssl-dev \
+            make \
+            python3 \
+            rsync \
+            xz-utils
+
+      - name: Validate kernel build
+        id: validate
+        env:
+          ARCH: arm64
+          CROSS_COMPILE: aarch64-linux-gnu-
+          BUILD_DIR: ${{ runner.temp }}/linux-full
+          OUT_DIR: ${{ runner.temp }}/out/arm64
+          ARTIFACT_DIR: ${{ runner.temp }}/artifacts
+          PLATFORM: rockchip
+          UPSTREAM_REPO_INPUT: ${{ github.event.inputs.upstream_repo }}
+          UPSTREAM_REF_INPUT: ${{ github.event.inputs.upstream_ref }}
+        run: |
+          set -euxo pipefail
+          shopt -s nullglob
+
+          platform="$PLATFORM"
+          repo="${UPSTREAM_REPO_INPUT:-https://github.com/cccsaber/linux-6.12.y.git}"
+          ref="${UPSTREAM_REF_INPUT:-main}"
+          REPORT_DIR="$ARTIFACT_DIR/build-report"
+          MODULES_ROOT="$ARTIFACT_DIR/modules-root"
+          HEADERS_UAPI_STAGE="$ARTIFACT_DIR/headers-uapi"
+          OUTPUT_DIR="$ARTIFACT_DIR/outputs"
+
+          config_args=(
+            -e MODULES
+            -e BLK_DEV_INITRD
+            -e ARCH_ROCKCHIP
+            -e ROCKCHIP_IOMMU
+            -e DRM
+            -e DRM_ROCKCHIP
+            -e ROCKCHIP_VOP
+            -e ROCKCHIP_VOP2
+            -e ROCKCHIP_DW_HDMI
+            -e PHY_ROCKCHIP_INNO_HDMI
+          )
+          dtb_targets=(
+            rk3528-armsom-sige1.dtb
+            rk3528-hlink-h28k.dtb
+            rk3528-nanopi-zero2.dtb
+            rk3528-radxa-e20c.dtb
+            rk3528-radxa-e24c.dtb
+            rk3528-radxa-e24c-dsa.dtb
+            rk3528-rock-2a.dtb
+            rk3528-rock-2f.dtb
+            rk3528-yixun-rs6pro.dtb
+          )
+          dtb_build_targets=("${dtb_targets[@]/#/rockchip/}")
+          dtb_source_dir="$OUT_DIR/arch/arm64/boot/dts/rockchip"
+
+          rm -rf "$BUILD_DIR" "$OUT_DIR" "$ARTIFACT_DIR"
+          mkdir -p \
+            "$OUT_DIR" \
+            "$REPORT_DIR" \
+            "$MODULES_ROOT" \
+            "$HEADERS_UAPI_STAGE" \
+            "$OUTPUT_DIR/boot" \
+            "$OUTPUT_DIR/dtb"
+
+          if [ -n "$ref" ]; then
+            git clone --depth=1 --branch "$ref" "$repo" "$BUILD_DIR"
+          else
+            git clone --depth=1 "$repo" "$BUILD_DIR"
+          fi
+
+          rsync -a \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'linux-full/' \
+            --exclude 'out/' \
+            --exclude 'fnnas/' \
+            "$GITHUB_WORKSPACE/" "$BUILD_DIR/"
+
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            defconfig \
+            2>&1 | tee "$REPORT_DIR/defconfig.log"
+
+          "$BUILD_DIR"/scripts/config --file "$OUT_DIR/.config" \
+            --set-str LOCALVERSION "-trim" \
+            -d LOCALVERSION_AUTO \
+            "${config_args[@]}"
+
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            olddefconfig \
+            2>&1 | tee "$REPORT_DIR/olddefconfig.log"
+
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            prepare modules_prepare \
+            2>&1 | tee "$REPORT_DIR/prepare.log"
+
+          KERNEL_RELEASE="$(make -s -C "$BUILD_DIR" O="$OUT_DIR" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" kernelrelease)"
+
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            -j"$(nproc)" \
+            W=1 \
+            Image \
+            modules \
+            "${dtb_build_targets[@]}" \
+            2>&1 | tee "$REPORT_DIR/full-build.log"
+
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            INSTALL_MOD_PATH="$MODULES_ROOT" \
+            modules_install \
+            2>&1 | tee "$REPORT_DIR/modules-install.log"
+
+          make -C "$BUILD_DIR" \
+            O="$OUT_DIR" \
+            ARCH="$ARCH" \
+            CROSS_COMPILE="$CROSS_COMPILE" \
+            INSTALL_HDR_PATH="$HEADERS_UAPI_STAGE" \
+            headers_install \
+            2>&1 | tee "$REPORT_DIR/headers-install.log"
+
+          cp "$OUT_DIR/.config" "$REPORT_DIR/kernel.config"
+          cp "$OUT_DIR/System.map" "$REPORT_DIR/System.map"
+          cp "$OUT_DIR/arch/arm64/boot/Image" "$OUTPUT_DIR/boot/Image-$KERNEL_RELEASE"
+          for dtb in "${dtb_targets[@]}"; do
+            cp "$dtb_source_dir/$dtb" "$OUTPUT_DIR/dtb/"
+          done
+
+          printf '%s\n' "$repo" > "$REPORT_DIR/upstream-repo.txt"
+          printf '%s\n' "$ref" > "$REPORT_DIR/upstream-ref.txt"
+          printf '%s\n' "$platform" > "$REPORT_DIR/platform.txt"
+          printf '%s\n' "$KERNEL_RELEASE" > "$REPORT_DIR/kernelrelease.txt"
+
+      - name: Upload validation artifacts
+        if: ${{ always() && steps.validate.outcome != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-6.12.y-rockchip-validate-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: ${{ runner.temp }}/artifacts

@@ -1,4 +1,4 @@
-name: Build linux-6.12.y-rockchip
+name: Package linux-6.12.y-rockchip FnNAS bundle
 
 on:
   repository_dispatch:
@@ -12,9 +12,13 @@ on:
         description: "Git ref to clone from the build base repo"
         required: false
         default: "main"
+      fnnas_repo:
+        description: "FnNAS repo used to reuse matching boot initrd when available"
+        required: false
+        default: "ophub/fnnas"
 
 concurrency:
-  group: linux-6.12.y-rockchip-${{ github.workflow }}-${{ github.ref }}
+  group: package-linux-6.12.y-rockchip-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -61,7 +65,7 @@ jobs:
             u-boot-tools \
             xz-utils
 
-      - name: Build fnnas-style kernel bundle
+      - name: Package FnNAS-style kernel bundle
         id: package
         env:
           ARCH: arm64
@@ -73,13 +77,17 @@ jobs:
           PLATFORM: rockchip
           UPSTREAM_REPO_INPUT: ${{ github.event.inputs.upstream_repo }}
           UPSTREAM_REF_INPUT: ${{ github.event.inputs.upstream_ref }}
+          FNNAS_REPO_INPUT: ${{ github.event.inputs.fnnas_repo }}
         run: |
           set -euxo pipefail
           shopt -s nullglob
 
+          # This workflow produces a FnNAS bundle and may reuse reference
+          # release assets when an exact package match already exists.
           platform="$PLATFORM"
           repo="${UPSTREAM_REPO_INPUT:-https://github.com/cccsaber/linux-6.12.y.git}"
           ref="${UPSTREAM_REF_INPUT:-main}"
+          fnnas_repo="${FNNAS_REPO_INPUT:-ophub/fnnas}"
 
           rm -rf "$BUILD_DIR" "$OUT_DIR" "$STAGE_DIR" "$ARTIFACT_DIR"
           mkdir -p "$OUT_DIR" "$STAGE_DIR" "$ARTIFACT_DIR"
@@ -158,10 +166,15 @@ jobs:
           DTB_STAGE="$STAGE_DIR/dtb"
           MODULES_STAGE="$STAGE_DIR/modules"
           HEADERS_STAGE="$STAGE_DIR/headers"
+          REFERENCE_DIR="$STAGE_DIR/reference"
           INITRD_ROOT="$STAGE_DIR/initrd"
           INITRD_MODULES_ROOT="$INITRD_ROOT/lib/modules/$KERNEL_RELEASE"
           MODULES_INSTALL_ROOT="$MODULES_ROOT/lib/modules/$KERNEL_RELEASE"
           HEADERS_UAPI_STAGE="$STAGE_DIR/headers-uapi"
+          INITRD_SOURCE="generated"
+          RELEASE_READY="false"
+          REF_MODULES_TAR=""
+          REF_HEADER_TAR=""
 
           rm -rf "$PACKAGE_PATH" "$REPORT_DIR" "$BUNDLE_PATH"
           mkdir -p \
@@ -171,6 +184,7 @@ jobs:
             "$DTB_STAGE" \
             "$MODULES_STAGE" \
             "$HEADERS_STAGE" \
+            "$REFERENCE_DIR" \
             "$INITRD_ROOT" \
             "$HEADERS_UAPI_STAGE"
 
@@ -396,7 +410,8 @@ jobs:
           makeLatest: false
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - FnNAS-style kernel bundle built from `linux-6.12.y-rockchip`.
+            - FnNAS-style kernel bundle packaged from `linux-6.12.y-rockchip`.
+            - This workflow may reuse matching reference bundle assets when available.
             - Use this repository as `kernel_repo` in FnNAS tooling when consuming `${{ steps.package.outputs.bundle_name }}`.
 
       - name: Upload build artifacts
