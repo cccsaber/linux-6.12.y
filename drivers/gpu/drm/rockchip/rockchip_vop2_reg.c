@@ -2368,6 +2368,17 @@ static const struct vop2_ops rk3568_vop_ops = {
 	.setup_overlay = rk3568_vop2_setup_overlay,
 };
 
+static const struct vop2_ops rk3528_vop_ops = {
+	/*
+	 * RK3528 shares the simpler HDMI interface muxing with RK3568, but
+	 * its per-VP overlay registers line up with the newer RK3576 layout.
+	 * Keep the bring-up path narrow and use the matching half from each.
+	 */
+	.setup_intf_mux = rk3568_set_intf_mux,
+	.setup_bg_dly = rk3576_vop2_setup_bg_dly,
+	.setup_overlay = rk3576_vop2_setup_overlay,
+};
+
 static const struct vop2_ops rk3576_vop_ops = {
 	.setup_intf_mux = rk3576_set_intf_mux,
 	.setup_bg_dly = rk3576_vop2_setup_bg_dly,
@@ -2378,6 +2389,63 @@ static const struct vop2_ops rk3588_vop_ops = {
 	.setup_intf_mux = rk3588_set_intf_mux,
 	.setup_bg_dly = rk3568_vop2_setup_bg_dly,
 	.setup_overlay = rk3568_vop2_setup_overlay,
+};
+
+static const struct vop2_video_port_data rk3528_vop_video_ports[] = {
+	{
+		.id = 0,
+		.feature = VOP2_VP_FEATURE_OUTPUT_10BIT,
+		.gamma_lut_len = 1024,
+		.max_output = { 4096, 4096 },
+		.pre_scan_max_dly = { 10, 8, 2, 0 },
+		.offset = 0xc00,
+		.pixel_rate = 2,
+	}, {
+		.id = 1,
+		.max_output = { 720, 576 },
+		.pre_scan_max_dly = { 10, 6, 0, 0 },
+		.offset = 0xd00,
+		.pixel_rate = 1,
+	},
+};
+
+static const struct vop2_win_data rk3528_vop_win_data[] = {
+	{
+		.name = "Cluster0-win0",
+		.phys_id = ROCKCHIP_VOP2_CLUSTER0,
+		.base = RK3568_CLUSTER0_CTRL_BASE,
+		.possible_vp_mask = BIT(0),
+		.formats = formats_rk3576_cluster,
+		.nformats = ARRAY_SIZE(formats_rk3576_cluster),
+		.format_modifiers = format_modifiers,
+		.supported_rotations = DRM_MODE_ROTATE_90 | DRM_MODE_ROTATE_270 |
+				       DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y,
+		.type = DRM_PLANE_TYPE_PRIMARY,
+		.axi_bus_id = 0,
+		.axi_yrgb_r_id = 2,
+		.axi_uv_r_id = 3,
+		.max_upscale_factor = 4,
+		.max_downscale_factor = 4,
+		.feature = WIN_FEATURE_CLUSTER,
+	},
+};
+
+static const struct vop2_data rk3528_vop = {
+	.version = VOP_VERSION_RK3528,
+	.nr_vps = 2,
+	.max_input = { 4096, 4096 },
+	.max_output = { 4096, 4096 },
+	.vp = rk3528_vop_video_ports,
+	.win = rk3528_vop_win_data,
+	.win_size = ARRAY_SIZE(rk3528_vop_win_data),
+	.cluster_reg = rk3568_vop_cluster_regs,
+	.nr_cluster_regs = ARRAY_SIZE(rk3568_vop_cluster_regs),
+	.smart_reg = rk3568_vop_smart_regs,
+	.nr_smart_regs = ARRAY_SIZE(rk3568_vop_smart_regs),
+	.regs_dump = rk3576_regs_dump,
+	.regs_dump_size = ARRAY_SIZE(rk3576_regs_dump),
+	.ops = &rk3528_vop_ops,
+	.soc_id = 3528,
 };
 
 static const struct vop2_data rk3566_vop = {
@@ -2459,6 +2527,9 @@ static const struct vop2_data rk3588_vop = {
 
 static const struct of_device_id vop2_dt_match[] = {
 	{
+		.compatible = "rockchip,rk3528-vop",
+		.data = &rk3528_vop,
+	}, {
 		.compatible = "rockchip,rk3566-vop",
 		.data = &rk3566_vop,
 	}, {

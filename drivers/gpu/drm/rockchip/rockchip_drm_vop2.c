@@ -2696,11 +2696,15 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
 	}
 
 	vop2->hclk = devm_clk_get(vop2->dev, "hclk");
+	if (PTR_ERR(vop2->hclk) == -ENOENT)
+		vop2->hclk = devm_clk_get(vop2->dev, "hclk_vop");
 	if (IS_ERR(vop2->hclk))
 		return dev_err_probe(drm->dev, PTR_ERR(vop2->hclk),
 				     "failed to get hclk source\n");
 
 	vop2->aclk = devm_clk_get(vop2->dev, "aclk");
+	if (PTR_ERR(vop2->aclk) == -ENOENT)
+		vop2->aclk = devm_clk_get(vop2->dev, "aclk_vop");
 	if (IS_ERR(vop2->aclk))
 		return dev_err_probe(drm->dev, PTR_ERR(vop2->aclk),
 				     "failed to get aclk source\n");
