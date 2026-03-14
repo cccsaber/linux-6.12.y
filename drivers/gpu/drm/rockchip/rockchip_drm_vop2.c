@@ -2614,6 +2614,21 @@ static const struct regmap_config vop2_regmap_config = {
 	.cache_type	= REGCACHE_MAPLE,
 };
 
+static struct resource *
+vop2_get_mem_resource(struct platform_device *pdev, const char *name,
+		      const char *legacy_name, unsigned int index)
+{
+	struct resource *res;
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
+	if (!res && legacy_name)
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM, legacy_name);
+	if (!res)
+		res = platform_get_resource(pdev, IORESOURCE_MEM, index);
+
+	return res;
+}
+
 static int vop2_bind(struct device *dev, struct device *master, void *data)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -2642,7 +2657,7 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
 
 	dev_set_drvdata(dev, vop2);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "vop");
+	res = vop2_get_mem_resource(pdev, "vop", "regs", 0);
 	if (!res)
 		return dev_err_probe(drm->dev, -EINVAL,
 				     "failed to get vop2 register byname\n");
@@ -2661,7 +2676,7 @@ static int vop2_bind(struct device *dev, struct device *master, void *data)
 	if (ret)
 		return ret;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "gamma-lut");
+	res = vop2_get_mem_resource(pdev, "gamma-lut", "gamma_lut", 1);
 	if (res) {
 		vop2->lut_regs = devm_ioremap_resource(dev, res);
 		if (IS_ERR(vop2->lut_regs))
