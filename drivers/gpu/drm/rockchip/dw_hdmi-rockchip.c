@@ -13,6 +13,7 @@
 #include <linux/phy/phy.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/workqueue.h>
 
 #include <drm/bridge/dw_hdmi.h>
 #include <drm/drm_edid.h>
@@ -53,13 +54,15 @@
 #define RK3399_GRF_SOC_CON20		0x6250
 #define RK3399_HDMI_LCDC_SEL		BIT(6)
 
-#define RK3528_VO_GRF_HDMI_MASK		0x60014
+#define RK3528_VO_GRF_HDMI_MASK		0x0014
 #define RK3528_HDMI_SNKDET_SEL		BIT(6)
 #define RK3528_HDMI_SNKDET		BIT(5)
 #define RK3528_HDMI_SDAIN_MSK		BIT(1)
 #define RK3528_HDMI_SCLIN_MSK		BIT(0)
 #define RK3528_GPIO_SWPORT_DR_L		0x0000
 #define RK3528_GPIO0_A2_DR		BIT(2)
+#define RK3528_HPD_SYNC_DELAY_MS	1000
+#define RK3528_HPD_SYNC_RETRIES		10
 
 #define RK3568_GRF_VO_CON1		0x0364
 #define RK3568_HDMI_SDAIN_MSK		BIT(15)
@@ -83,6 +86,7 @@ struct rockchip_hdmi_chip_data {
 
 struct rockchip_hdmi {
 	struct device *dev;
+	struct drm_device *drm_dev;
 	struct regmap *regmap;
 	struct rockchip_encoder encoder;
 	const struct rockchip_hdmi_chip_data *chip_data;
@@ -95,6 +99,8 @@ struct rockchip_hdmi {
 	struct gpio_desc *hpd_gpiod;
 	void __iomem *gpio_base;
 	int hpd_irq;
+	struct delayed_work hpd_work;
+	unsigned int hpd_retries;
 };
 
 static struct rockchip_hdmi_chip_data rk3528_chip_data;
@@ -110,6 +116,11 @@ static bool rockchip_hdmi_is_rk3528(struct rockchip_hdmi *hdmi)
 {
 	return of_device_is_compatible(hdmi->dev->of_node,
 				       "rockchip,rk3528-dw-hdmi");
+}
+
+static bool rockchip_hdmi_has_rk3528_gpio_hpd(struct rockchip_hdmi *hdmi)
+{
+	return rockchip_hdmi_is_rk3528(hdmi) && hdmi->hpd_gpiod && hdmi->gpio_base;
 }
 
 static const struct dw_hdmi_mpll_config rockchip_mpll_cfg[] = {
@@ -230,12 +241,19 @@ static irqreturn_t rockchip_hdmi_hpd_irq_handler(int irq, void *arg)
 
 	regmap_write(hdmi->regmap, RK3528_VO_GRF_HDMI_MASK, val);
 
+	if (hdmi->drm_dev && hdmi->hdmi)
+		drm_helper_hpd_irq_event(hdmi->drm_dev);
+
 	return IRQ_HANDLED;
 }
 
 static void dw_hdmi_rk3528_gpio_hpd_init(struct rockchip_hdmi *hdmi)
 {
 	u32 val;
+	int gpio_state = -EINVAL;
+
+	if (hdmi->hpd_gpiod)
+		gpio_state = gpiod_get_value(hdmi->hpd_gpiod);
 
 	if (hdmi->hpd_gpiod) {
 		/*
@@ -260,12 +278,47 @@ static void dw_hdmi_rk3528_gpio_hpd_init(struct rockchip_hdmi *hdmi)
 
 	regmap_write(hdmi->regmap, RK3528_VO_GRF_HDMI_MASK, val);
 
-	if (hdmi->hpd_gpiod && gpiod_get_value(hdmi->hpd_gpiod))
+	if (hdmi->hpd_gpiod && gpio_state > 0)
 		val = HIWORD_UPDATE(RK3528_HDMI_SNKDET, RK3528_HDMI_SNKDET);
 	else
 		val = HIWORD_UPDATE(0, RK3528_HDMI_SNKDET);
 
 	regmap_write(hdmi->regmap, RK3528_VO_GRF_HDMI_MASK, val);
+}
+
+static void rockchip_hdmi_rk3528_hpd_work(struct work_struct *work)
+{
+	struct rockchip_hdmi *hdmi = container_of(to_delayed_work(work),
+						  struct rockchip_hdmi,
+						  hpd_work);
+	bool connected;
+
+	if (!rockchip_hdmi_has_rk3528_gpio_hpd(hdmi))
+		return;
+
+	dw_hdmi_rk3528_gpio_hpd_init(hdmi);
+	connected = gpiod_get_value(hdmi->hpd_gpiod) > 0;
+
+	if (hdmi->drm_dev && hdmi->hdmi)
+		drm_helper_hpd_irq_event(hdmi->drm_dev);
+
+	if (!connected && hdmi->hpd_retries++ < RK3528_HPD_SYNC_RETRIES) {
+		mod_delayed_work(system_wq, &hdmi->hpd_work,
+				 msecs_to_jiffies(RK3528_HPD_SYNC_DELAY_MS));
+		return;
+	}
+
+	hdmi->hpd_retries = 0;
+}
+
+static void rockchip_hdmi_queue_rk3528_hpd_sync(struct rockchip_hdmi *hdmi)
+{
+	if (!rockchip_hdmi_has_rk3528_gpio_hpd(hdmi))
+		return;
+
+	hdmi->hpd_retries = 0;
+	mod_delayed_work(system_wq, &hdmi->hpd_work,
+			 msecs_to_jiffies(RK3528_HPD_SYNC_DELAY_MS));
 }
 
 static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
@@ -722,8 +775,10 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 		return -ENOMEM;
 
 	hdmi->dev = &pdev->dev;
+	hdmi->drm_dev = drm;
 	hdmi->plat_data = plat_data;
 	hdmi->chip_data = plat_data->phy_data;
+	INIT_DELAYED_WORK(&hdmi->hpd_work, rockchip_hdmi_rk3528_hpd_work);
 	plat_data->phy_data = hdmi;
 	plat_data->priv_data = hdmi;
 	encoder = &hdmi->encoder.encoder;
@@ -796,6 +851,8 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 		goto err_bind;
 	}
 
+	rockchip_hdmi_queue_rk3528_hpd_sync(hdmi);
+
 	return 0;
 
 err_bind:
@@ -809,6 +866,7 @@ static void dw_hdmi_rockchip_unbind(struct device *dev, struct device *master,
 {
 	struct rockchip_hdmi *hdmi = dev_get_drvdata(dev);
 
+	cancel_delayed_work_sync(&hdmi->hpd_work);
 	dw_hdmi_unbind(hdmi->hdmi);
 	drm_encoder_cleanup(&hdmi->encoder.encoder);
 }
@@ -832,10 +890,11 @@ static int __maybe_unused dw_hdmi_rockchip_resume(struct device *dev)
 {
 	struct rockchip_hdmi *hdmi = dev_get_drvdata(dev);
 
-	if (hdmi->hpd_gpiod)
+	if (rockchip_hdmi_has_rk3528_gpio_hpd(hdmi))
 		dw_hdmi_rk3528_gpio_hpd_init(hdmi);
 
 	dw_hdmi_resume(hdmi->hdmi);
+	rockchip_hdmi_queue_rk3528_hpd_sync(hdmi);
 
 	return 0;
 }
