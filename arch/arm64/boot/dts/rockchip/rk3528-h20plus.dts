@@ -3246,6 +3246,17 @@
 		phandle = <0x17b>;
 	};
 
+	wireless-wlan {
+		compatible = "wlan-platdata";
+		rockchip,grf = <0x186>;
+		wifi_chip_type = "AIC8800";
+		pinctrl-names = "default";
+		pinctrl-0 = <0x178>;
+		WIFI,reset_gpio = <0x72 0x06 0x01>;
+		WIFI,host_wake_irq = <0x72 0x07 0x00>;
+		status = "okay";
+	};
+
 
 	vcc-sd {
 		compatible = "regulator-fixed";

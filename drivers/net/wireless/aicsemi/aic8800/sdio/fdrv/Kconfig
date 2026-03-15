@@ -1,0 +1,5 @@
+config AIC8800_WLAN_SUPPORT
+	tristate "AIC8800 wlan Support"
+	default m if AIC8800_SDIO_WLAN
+	help
+	  This is support for aic wifi driver.
