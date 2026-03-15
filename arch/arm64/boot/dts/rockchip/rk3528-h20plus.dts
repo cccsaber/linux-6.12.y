@@ -1613,18 +1613,8 @@
 
 		leds {
 
-			led-green-en {
-				rockchip,pins = <0x04 0x0f 0x00 0x12>;
-				phandle = <0x6a>;
-			};
-
-			led-amber-en {
-				rockchip,pins = <0x04 0x11 0x00 0x12>;
-				phandle = <0x6b>;
-			};
-
-			led-blue-en {
-				rockchip,pins = <0x04 0x10 0x00 0x12>;
+			led-power-pin {
+				rockchip,pins = <0x04 0x0b 0x00 0x0e>;
 				phandle = <0x6c>;
 			};
 		};
@@ -3115,27 +3105,14 @@
 
 	leds {
 		compatible = "gpio-leds";
-		pinctrl-names = "led-green\0led-amber\0led-blue";
-		pinctrl-0 = <0x6a 0x6b 0x6c>;
 		phandle = <0x170>;
 
-		led-green {
-			label = "led_green";
-			gpios = <0x1a 0x0f 0x01>;
-			linux,default-trigger = "heartbeat";
+		power {
+			label = "power";
+			gpios = <0x1a 0x0b 0x00>;
+			linux,default-trigger = "default-on";
+			default-state = "on";
 			phandle = <0x171>;
-		};
-
-		led-amber {
-			label = "led_amber";
-			gpios = <0x1a 0x11 0x01>;
-			phandle = <0x172>;
-		};
-
-		led-blue {
-			label = "led_blue";
-			gpios = <0x1a 0x10 0x01>;
-			phandle = <0x173>;
 		};
 	};
 
@@ -3540,9 +3517,7 @@
 		uart7m1_xfer = "/pinctrl/uart7/uart7m1-xfer";
 		uart7m1_ctsn = "/pinctrl/uart7/uart7m1-ctsn";
 		uart7m1_rtsn = "/pinctrl/uart7/uart7m1-rtsn";
-		led_green_en = "/pinctrl/leds/led-green-en";
-		led_amber_en = "/pinctrl/leds/led-amber-en";
-		led_blue_en = "/pinctrl/leds/led-blue-en";
+		led_power_pin = "/pinctrl/leds/led-power-pin";
 		gmac1_reset_pin = "/pinctrl/gmac/gmac1-reset-pin";
 		reserved_memory = "/reserved-memory";
 		scmi_shmem = "/reserved-memory/shmem@10f000";
@@ -3666,9 +3641,7 @@
 		adc_keys = "/adc-keys";
 		chosen = "/chosen";
 		leds = "/leds";
-		led_green = "/leds/led-green";
-		led_amber = "/leds/led-amber";
-		led_blue = "/leds/led-blue";
+		power_led = "/leds/power";
 		vcc12v_dcin = "/vcc12v-dcin";
 		vcc5v0_sys = "/vcc5v0-sys";
 		vcc_3v3_s3 = "/vcc-3v3-s3";
