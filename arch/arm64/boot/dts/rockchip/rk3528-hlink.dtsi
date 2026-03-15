@@ -72,6 +72,16 @@
 			linux,cma-default;
 		};
 
+		drm_logo: drm-logo@0 {
+			compatible = "rockchip,drm-logo";
+			reg = <0x0 0x0 0x0 0x0>;
+		};
+
+		drm_cubic_lut: drm-cubic-lut@0 {
+			compatible = "rockchip,drm-cubic-lut";
+			reg = <0x0 0x0 0x0 0x0>;
+		};
+
 		ramoops: ramoops@110000 {
 			compatible = "ramoops";
 			/* 0x110000 to 0x1f0000 is for ramoops */
@@ -199,6 +209,23 @@
 	status = "okay";
 };
 
+&display_subsystem {
+	status = "disabled";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+
+	route {
+		route_hdmi: route-hdmi {
+			status = "disabled";
+			logo,uboot = "logo.bmp";
+			logo,kernel = "logo_kernel.bmp";
+			logo,mode = "center";
+			charge_logo,mode = "center";
+			connect = <&vp0_out_hdmi>;
+		};
+	};
+};
+
 &cpu0 {
 	cpu-supply = <&vdd_arm>;
 };
@@ -233,6 +260,18 @@
 &gpu {
 	mali-supply = <&vdd_logic>;
 	status = "okay";
+};
+
+&hdmi {
+	status = "disabled";
+};
+
+&hdmi_in_vp0 {
+	status = "disabled";
+};
+
+&hdmiphy {
+	status = "disabled";
 };
 
 &mdio1 {
@@ -360,5 +399,13 @@
 	maximum-speed = "high-speed";
 	phys = <&u2phy_otg>;
 	phy-names = "usb2-phy";
+	status = "okay";
+};
+
+&vop {
+	status = "okay";
+};
+
+&vop_mmu {
 	status = "okay";
 };
