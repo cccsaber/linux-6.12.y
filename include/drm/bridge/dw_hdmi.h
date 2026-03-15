@@ -10,7 +10,10 @@
 
 struct drm_display_info;
 struct drm_display_mode;
+struct drm_connector;
+struct drm_connector_state;
 struct drm_encoder;
+struct drm_property;
 struct dw_hdmi;
 struct platform_device;
 
@@ -123,6 +126,24 @@ struct dw_hdmi_phy_ops {
 	void (*setup_hpd)(struct dw_hdmi *hdmi, void *data);
 };
 
+struct dw_hdmi_property_ops {
+	void (*attach_properties)(struct drm_connector *connector,
+				  unsigned int color, int version,
+				  void *data, bool allm_en);
+	void (*destroy_properties)(struct drm_connector *connector,
+				   void *data);
+	int (*set_property)(struct drm_connector *connector,
+			    struct drm_connector_state *state,
+			    struct drm_property *property,
+			    u64 val,
+			    void *data);
+	int (*get_property)(struct drm_connector *connector,
+			    const struct drm_connector_state *state,
+			    struct drm_property *property,
+			    u64 *val,
+			    void *data);
+};
+
 struct dw_hdmi_plat_data {
 	struct regmap *regm;
 
@@ -161,6 +182,11 @@ struct dw_hdmi_plat_data {
 	int (*configure_phy)(struct dw_hdmi *hdmi, void *data,
 			     unsigned long mpixelclock);
 
+	unsigned long (*get_quant_range)(void *data);
+	struct drm_display_mode *(*get_force_timing)(void *data);
+
+	const struct dw_hdmi_property_ops *property_ops;
+
 	unsigned int disable_cec : 1;
 };
 
@@ -175,6 +201,9 @@ void dw_hdmi_poweron(struct dw_hdmi *hdmi);
 void dw_hdmi_poweroff(struct dw_hdmi *hdmi);
 void dw_hdmi_resume(struct dw_hdmi *hdmi);
 bool dw_hdmi_is_bridge_on(struct dw_hdmi *hdmi);
+void dw_hdmi_set_quant_range(struct dw_hdmi *hdmi);
+void dw_hdmi_set_output_type(struct dw_hdmi *hdmi, u64 val);
+bool dw_hdmi_get_output_whether_hdmi(struct dw_hdmi *hdmi);
 
 void dw_hdmi_setup_rx_sense(struct dw_hdmi *hdmi, bool hpd, bool rx_sense);
 

@@ -16,10 +16,17 @@
 #include <linux/workqueue.h>
 
 #include <drm/bridge/dw_hdmi.h>
+#include <drm/drm_connector.h>
 #include <drm/drm_edid.h>
+#include <drm/drm_modes.h>
 #include <drm/drm_of.h>
+#include <drm/drm_property.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_simple_kms_helper.h>
+
+#include <video/display_timing.h>
+#include <video/of_display_timing.h>
+#include <video/videomode.h>
 
 #include "rockchip_drm_drv.h"
 
@@ -101,6 +108,12 @@ struct rockchip_hdmi {
 	int hpd_irq;
 	struct delayed_work hpd_work;
 	unsigned int hpd_retries;
+	struct drm_property *quant_range;
+	struct drm_property *output_hdmi_dvi;
+	unsigned int hdmi_quant_range;
+	u8 force_output;
+	bool timing_force_output;
+	struct drm_display_mode force_mode;
 };
 
 static struct rockchip_hdmi_chip_data rk3528_chip_data;
@@ -325,8 +338,12 @@ static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 {
 	struct platform_device *pdev = to_platform_device(hdmi->dev);
 	struct device_node *np = hdmi->dev->of_node;
+	struct display_timing timing = { };
+	struct videomode vm = { };
 	struct resource *res;
 	int ret;
+
+	hdmi->hdmi_quant_range = HDMI_QUANTIZATION_RANGE_DEFAULT;
 
 	hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
 	if (IS_ERR(hdmi->regmap)) {
@@ -396,6 +413,21 @@ static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 		}
 	}
 
+	if (of_property_read_bool(np, "force-output")) {
+		hdmi->timing_force_output = true;
+
+		ret = of_get_display_timing(np, "force_timing", &timing);
+		if (ret < 0) {
+			dev_err(hdmi->dev, "can't get force timing\n");
+			hdmi->timing_force_output = false;
+			return ret;
+		}
+
+		videomode_from_timing(&timing, &vm);
+		drm_display_mode_from_videomode(&vm, &hdmi->force_mode);
+		hdmi->force_mode.type |= DRM_MODE_TYPE_PREFERRED;
+	}
+
 	ret = devm_regulator_get_enable(hdmi->dev, "avdd-0v9");
 	if (ret)
 		return ret;
@@ -433,6 +465,137 @@ dw_hdmi_rockchip_mode_valid(struct dw_hdmi *dw_hdmi, void *data,
 
 	return MODE_OK;
 }
+
+static unsigned long dw_hdmi_rockchip_get_quant_range(void *data)
+{
+	struct rockchip_hdmi *hdmi = data;
+
+	return hdmi->hdmi_quant_range;
+}
+
+static struct drm_display_mode *dw_hdmi_rockchip_get_force_timing(void *data)
+{
+	struct rockchip_hdmi *hdmi = data;
+
+	if (!hdmi->timing_force_output)
+		return NULL;
+
+	return &hdmi->force_mode;
+}
+
+static const struct drm_prop_enum_list quant_range_enum_list[] = {
+	{ HDMI_QUANTIZATION_RANGE_DEFAULT, "default" },
+	{ HDMI_QUANTIZATION_RANGE_LIMITED, "limit" },
+	{ HDMI_QUANTIZATION_RANGE_FULL, "full" },
+};
+
+static const struct drm_prop_enum_list output_hdmi_dvi_enum_list[] = {
+	{ 0, "auto" },
+	{ 1, "force_hdmi" },
+	{ 2, "force_dvi" },
+};
+
+static void
+dw_hdmi_rockchip_attach_properties(struct drm_connector *connector,
+				   unsigned int color, int version,
+				   void *data, bool allm_en)
+{
+	struct rockchip_hdmi *hdmi = data;
+	struct drm_property *prop;
+
+	prop = drm_property_create_enum(connector->dev, 0,
+					"output_hdmi_dvi",
+					output_hdmi_dvi_enum_list,
+					ARRAY_SIZE(output_hdmi_dvi_enum_list));
+	if (prop) {
+		hdmi->output_hdmi_dvi = prop;
+		drm_object_attach_property(&connector->base, prop,
+					   hdmi->force_output);
+	}
+
+	prop = drm_property_create_enum(connector->dev, 0,
+					"quant_range",
+					quant_range_enum_list,
+					ARRAY_SIZE(quant_range_enum_list));
+	if (prop) {
+		hdmi->quant_range = prop;
+		drm_object_attach_property(&connector->base, prop,
+					   hdmi->hdmi_quant_range);
+	}
+}
+
+static void
+dw_hdmi_rockchip_destroy_properties(struct drm_connector *connector,
+				    void *data)
+{
+	struct rockchip_hdmi *hdmi = data;
+
+	if (hdmi->quant_range) {
+		drm_property_destroy(connector->dev, hdmi->quant_range);
+		hdmi->quant_range = NULL;
+	}
+
+	if (hdmi->output_hdmi_dvi) {
+		drm_property_destroy(connector->dev, hdmi->output_hdmi_dvi);
+		hdmi->output_hdmi_dvi = NULL;
+	}
+}
+
+static int
+dw_hdmi_rockchip_set_property(struct drm_connector *connector,
+			      struct drm_connector_state *state,
+			      struct drm_property *property,
+			      u64 val, void *data)
+{
+	struct rockchip_hdmi *hdmi = data;
+	u64 old;
+
+	if (property == hdmi->quant_range) {
+		old = hdmi->hdmi_quant_range;
+		hdmi->hdmi_quant_range = val;
+		if (old != val && hdmi->hdmi)
+			dw_hdmi_set_quant_range(hdmi->hdmi);
+		return 0;
+	}
+
+	if (property == hdmi->output_hdmi_dvi) {
+		old = hdmi->force_output;
+		hdmi->force_output = val;
+		if (old != val && hdmi->hdmi)
+			dw_hdmi_set_output_type(hdmi->hdmi, val);
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+static int
+dw_hdmi_rockchip_get_property(struct drm_connector *connector,
+			      const struct drm_connector_state *state,
+			      struct drm_property *property,
+			      u64 *val, void *data)
+{
+	struct rockchip_hdmi *hdmi = data;
+
+	if (property == hdmi->quant_range) {
+		*val = hdmi->hdmi_quant_range;
+		return 0;
+	}
+
+	if (property == hdmi->output_hdmi_dvi) {
+		*val = hdmi->force_output;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+static const struct dw_hdmi_property_ops dw_hdmi_rockchip_property_ops = {
+	.attach_properties = dw_hdmi_rockchip_attach_properties,
+	.destroy_properties = dw_hdmi_rockchip_destroy_properties,
+	.set_property = dw_hdmi_rockchip_set_property,
+	.get_property = dw_hdmi_rockchip_get_property,
+};
 
 static void dw_hdmi_rockchip_encoder_disable(struct drm_encoder *encoder)
 {
@@ -781,6 +944,9 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 	INIT_DELAYED_WORK(&hdmi->hpd_work, rockchip_hdmi_rk3528_hpd_work);
 	plat_data->phy_data = hdmi;
 	plat_data->priv_data = hdmi;
+	plat_data->get_quant_range = dw_hdmi_rockchip_get_quant_range;
+	plat_data->get_force_timing = dw_hdmi_rockchip_get_force_timing;
+	plat_data->property_ops = &dw_hdmi_rockchip_property_ops;
 	encoder = &hdmi->encoder.encoder;
 
 	encoder->possible_crtcs = drm_of_find_possible_crtcs(drm, dev->of_node);
