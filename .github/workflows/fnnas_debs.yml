@@ -2,6 +2,17 @@ name: fnnas_debs
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/fnnas_debs.yml
+      - Makefile
+      - arch/arm64/boot/dts/rockchip/**
+      - arch/arm64/configs/**
+      - drivers/gpu/drm/rockchip/**
+      - drivers/mmc/**
+      - drivers/net/wireless/aicsemi/**
 
 concurrency:
   group: fnnas-debs-${{ github.ref }}
@@ -104,7 +115,7 @@ jobs:
             defconfig
 
           "$BUILD_DIR"/scripts/config --file "$BUILD_DIR/.config" \
-            --set-str LOCALVERSION "-rockchip" \
+            --set-str LOCALVERSION "-trim" \
             -d LOCALVERSION_AUTO \
             "${config_args[@]}"
 
@@ -132,7 +143,12 @@ jobs:
           for deb in "$BUILD_ROOT"/*.deb; do
             deb_name="$(basename "$deb")"
             case "$deb_name" in
+              linux-image-*.deb|linux-modules-*.deb|linux-modules-extra-*.deb)
+                ;;
               *-dbg_*.deb|*-dbgsym_*.deb)
+                continue
+                ;;
+              *)
                 continue
                 ;;
             esac
@@ -146,7 +162,7 @@ jobs:
           fi
 
           deb_count="$(find "$PKG_DIR/$PLATFORM" -maxdepth 1 -type f -name '*.deb' | wc -l)"
-          if [ "$deb_count" -lt 2 ]; then
+          if [ "$deb_count" -lt 1 ]; then
             echo "Unexpected Debian package count: $deb_count" >&2
             exit 1
           fi
@@ -177,7 +193,7 @@ jobs:
           makeLatest: false
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - Debian kernel packages for FnNAS `rekernel`.
+            - Minimal Debian kernel runtime packages for FnNAS `rekernel`.
             - Asset name follows the `rekernel` parser: `${{ steps.package.outputs.kernel_base }}.tar.gz`.
             - Extracted tarball layout: `rockchip/*.deb`.
 
