@@ -85,6 +85,11 @@ jobs:
             -e BLK_DEV_INITRD
             -e ARCH_ROCKCHIP
             -e ROCKCHIP_IOMMU
+            -m BLK_DEV_MD
+            -m MD_RAID0
+            -m MD_RAID1
+            -m MD_RAID10
+            -m MD_RAID456
             -e DRM
             -e DRM_ROCKCHIP
             -e ROCKCHIP_VOP
