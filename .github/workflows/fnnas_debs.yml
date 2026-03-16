@@ -7,17 +7,6 @@ on:
         description: "Optional spoofed kernel release, e.g. 6.12.41-trim"
         required: false
         default: ""
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/fnnas_debs.yml
-      - Makefile
-      - arch/arm64/boot/dts/rockchip/**
-      - arch/arm64/configs/**
-      - drivers/gpu/drm/rockchip/**
-      - drivers/mmc/**
-      - drivers/net/wireless/aicsemi/**
 
 concurrency:
   group: fnnas-debs-${{ github.ref }}
