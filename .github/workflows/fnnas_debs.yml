@@ -2,6 +2,11 @@ name: fnnas_debs
 
 on:
   workflow_dispatch:
+    inputs:
+      packaged_kernel_release:
+        description: "Optional spoofed kernel release, e.g. 6.12.41-trim"
+        required: false
+        default: ""
   push:
     branches:
       - main
@@ -78,6 +83,7 @@ jobs:
           PKG_DIR: ${{ runner.temp }}/fnnas-debs/package
           RELEASE_DIR: ${{ runner.temp }}/fnnas-debs/release
           REPORT_DIR: ${{ runner.temp }}/fnnas-debs/report
+          PACKAGED_KERNEL_RELEASE: ${{ github.event.inputs.packaged_kernel_release || '' }}
         run: |
           set -euxo pipefail
           shopt -s nullglob
@@ -114,8 +120,33 @@ jobs:
             CROSS_COMPILE="$CROSS_COMPILE" \
             defconfig
 
+          localversion_suffix="-trim"
+          if [[ -n "$PACKAGED_KERNEL_RELEASE" ]]; then
+            if [[ ! "$PACKAGED_KERNEL_RELEASE" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)([-A-Za-z0-9._+]*)$ ]]; then
+              echo "Invalid packaged_kernel_release: $PACKAGED_KERNEL_RELEASE" >&2
+              exit 1
+            fi
+
+            version="${BASH_REMATCH[1]}"
+            patchlevel="${BASH_REMATCH[2]}"
+            sublevel="${BASH_REMATCH[3]}"
+            localversion_suffix="${BASH_REMATCH[4]}"
+
+            if [[ -z "$localversion_suffix" ]]; then
+              echo "packaged_kernel_release must include a suffix, e.g. -trim" >&2
+              exit 1
+            fi
+
+            perl -0pi -e '
+              s/^VERSION = .*/VERSION = '"$version"'/m;
+              s/^PATCHLEVEL = .*/PATCHLEVEL = '"$patchlevel"'/m;
+              s/^SUBLEVEL = .*/SUBLEVEL = '"$sublevel"'/m;
+              s/^EXTRAVERSION = .*/EXTRAVERSION =/m;
+            ' "$BUILD_DIR/Makefile"
+          fi
+
           "$BUILD_DIR"/scripts/config --file "$BUILD_DIR/.config" \
-            --set-str LOCALVERSION "-trim" \
+            --set-str LOCALVERSION "$localversion_suffix" \
             -d LOCALVERSION_AUTO \
             "${config_args[@]}"
 
