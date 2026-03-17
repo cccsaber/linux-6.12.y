@@ -16,6 +16,7 @@
 #include "dw_mmc-pltfm.h"
 
 #define RK3288_CLKGEN_DIV		2
+#define USRID_INTER_PHASE		0x20230001
 #define SDMMC_TIMING_CON0		0x130
 #define SDMMC_TIMING_CON1		0x134
 #define SDMMC_MISC_CON			0x138
@@ -37,9 +38,17 @@ struct dw_mci_rockchip_priv_data {
 	int			default_sample_phase;
 	int			num_phases;
 	bool			internal_phase;
+	int			usrid;
 	int			last_degree;
 	bool			use_v2_tuning;
+	u32			f_min;
 };
+
+static inline bool
+rockchip_mmc_uses_internal_phase(struct dw_mci_rockchip_priv_data *priv)
+{
+	return priv->internal_phase || priv->usrid == USRID_INTER_PHASE;
+}
 
 /*
  * Each fine delay is between 44ps-77ps. Assume each fine delay is 60ps to
@@ -82,7 +91,7 @@ static int rockchip_mmc_get_phase(struct dw_mci *host, bool sample)
 	struct dw_mci_rockchip_priv_data *priv = host->priv;
 	struct clk *clock = sample ? priv->sample_clk : priv->drv_clk;
 
-	if (priv->internal_phase)
+	if (rockchip_mmc_uses_internal_phase(priv))
 		return rockchip_mmc_get_internal_phase(host, sample);
 	else
 		return clk_get_phase(clock);
@@ -169,7 +178,7 @@ static int rockchip_mmc_set_phase(struct dw_mci *host, bool sample, int degrees)
 	struct dw_mci_rockchip_priv_data *priv = host->priv;
 	struct clk *clock = sample ? priv->sample_clk : priv->drv_clk;
 
-	if (priv->internal_phase)
+	if (rockchip_mmc_uses_internal_phase(priv))
 		return rockchip_mmc_set_internal_phase(host, sample, degrees);
 	else
 		return clk_set_phase(clock, degrees);
@@ -194,6 +203,11 @@ static void dw_mci_rk3288_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 	 * Note: div can only be 0 or 1, but div must be set to 1 for eMMC
 	 * DDR52 8-bit mode.
 	 */
+	if (ios->clock < priv->f_min) {
+		ios->clock = priv->f_min;
+		host->slot->clock = ios->clock;
+	}
+
 	if (ios->bus_width == MMC_BUS_WIDTH_8 &&
 	    ios->timing == MMC_TIMING_MMC_DDR52)
 		cclkin = 2 * ios->clock * RK3288_CLKGEN_DIV;
@@ -294,7 +308,7 @@ static int dw_mci_v2_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 
 	if (inherit) {
 		inherit = false;
-		i = clk_get_phase(priv->sample_clk) / 90;
+		i = rockchip_mmc_get_phase(host, true) / 90;
 		degree = degrees[i];
 		goto done;
 	}
@@ -310,7 +324,7 @@ static int dw_mci_v2_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 	for (i = 0; i < ARRAY_SIZE(degrees); i++) {
 		degree = degrees[i] + priv->last_degree + 90;
 		degree = degree % 360;
-		clk_set_phase(priv->sample_clk, degree);
+		rockchip_mmc_set_phase(host, true, degree);
 		if (mmc_send_tuning(mmc, opcode, NULL)) {
 			/*
 			 * Tuning error, the phase is a bad phase,
@@ -318,7 +332,7 @@ static int dw_mci_v2_execute_tuning(struct dw_mci_slot *slot, u32 opcode)
 			 */
 			dev_info(host->dev, "V2 tuned phase to %d error, try the best phase\n", degree);
 			degree = (degree + 180) % 360;
-			clk_set_phase(priv->sample_clk, degree);
+			rockchip_mmc_set_phase(host, true, degree);
 			if (!mmc_send_tuning(mmc, opcode, NULL))
 				break;
 		}
@@ -478,6 +492,16 @@ static int dw_mci_common_parse_dt(struct dw_mci *host)
 	if (!priv)
 		return -ENOMEM;
 
+	/*
+	 * Keep the 6.1 vendor minimum-frequency guard for low-speed ID mode.
+	 * RK3528 still uses the rk3288-compatible path here.
+	 */
+	if (of_device_is_compatible(host->dev->of_node,
+				    "rockchip,rk3568-dw-mshc"))
+		priv->f_min = 375000;
+	else
+		priv->f_min = 100000;
+
 	if (of_property_read_u32(np, "rockchip,desired-num-phases",
 				 &priv->num_phases))
 		priv->num_phases = 360;
@@ -560,9 +584,16 @@ static int dw_mci_rockchip_init(struct dw_mci *host)
 			dev_warn(host->dev, "no valid minimum freq: %d\n", ret);
 	}
 
-	if (priv->internal_phase)
+	priv->usrid = mci_readl(host, USRID);
+	if (priv->usrid == USRID_INTER_PHASE) {
+		priv->sample_clk = NULL;
+		priv->drv_clk = NULL;
+	}
+
+	if (rockchip_mmc_uses_internal_phase(priv))
 		mci_writel(host, MISC_CON, MEM_CLK_AUTOGATE_ENABLE);
 
+	host->need_xfer_timer = true;
 	return 0;
 }
 
