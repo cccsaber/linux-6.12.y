@@ -2811,13 +2811,12 @@
 			clock-names = "biu\0ciu\0ciu-drive\0ciu-sample";
 			fifo-depth = <0x100>;
 			interrupts = <0x00 0x85 0x04>;
-			max-frequency = <0x5f5e100>;
+			max-frequency = <0x8f0d180>;
 			pinctrl-names = "default";
 			pinctrl-0 = <0x61 0x62 0x63 0x64>;
 			power-domains = <0x0d 0x07>;
 			resets = <0x0b 0xbd>;
 			reset-names = "reset";
-			rockchip,use-v2-tuning;
 			rockchip,default-sample-phase = <0x5a>;
 			status = "okay";
 			bus-width = <0x04>;
@@ -2828,6 +2827,7 @@
 			sd-uhs-sdr12;
 			sd-uhs-sdr25;
 			sd-uhs-sdr50;
+			sd-uhs-sdr104;
 			vmmc-supply = <0x65>;
 			vqmmc-supply = <0x66>;
 			phandle = <0x166>;
