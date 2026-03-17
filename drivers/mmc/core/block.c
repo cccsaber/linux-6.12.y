@@ -128,6 +128,13 @@ static DEFINE_MUTEX(block_mutex);
  * or bootarg options.
  */
 static int perdev_minors = CONFIG_MMC_BLOCK_MINORS;
+/*
+ * Some appliance userspace stacks treat every visible MMC block device as a
+ * removable disk candidate. Hiding eMMC boot areas by default avoids bogus
+ * removable-disk handling for mmcblkXboot0/1 while keeping them available via
+ * an explicit kernel parameter when needed for maintenance.
+ */
+static bool show_emmc_boot_partitions;
 
 /*
  * We've only got one major, so number of mmcblk devices is
@@ -217,6 +224,9 @@ static DEFINE_MUTEX(open_lock);
 
 module_param(perdev_minors, int, 0444);
 MODULE_PARM_DESC(perdev_minors, "Minors numbers to allocate per device");
+module_param(show_emmc_boot_partitions, bool, 0644);
+MODULE_PARM_DESC(show_emmc_boot_partitions,
+		 "Expose eMMC boot partitions as mmcblkXbootY block devices");
 
 static inline int mmc_blk_part_switch(struct mmc_card *card,
 				      unsigned int part_type);
@@ -3054,6 +3064,10 @@ static int mmc_blk_alloc_parts(struct mmc_card *card, struct mmc_blk_data *md)
 		return 0;
 
 	for (idx = 0; idx < card->nr_parts; idx++) {
+		if (!show_emmc_boot_partitions &&
+		    (card->part[idx].area_type & MMC_BLK_DATA_AREA_BOOT))
+			continue;
+
 		if (card->part[idx].area_type & MMC_BLK_DATA_AREA_RPMB) {
 			/*
 			 * RPMB partitions does not provide block access, they
