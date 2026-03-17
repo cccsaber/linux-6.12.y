@@ -593,7 +593,6 @@ static int dw_mci_rockchip_init(struct dw_mci *host)
 	if (rockchip_mmc_uses_internal_phase(priv))
 		mci_writel(host, MISC_CON, MEM_CLK_AUTOGATE_ENABLE);
 
-	host->need_xfer_timer = true;
 	return 0;
 }
 
